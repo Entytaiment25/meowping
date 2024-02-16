@@ -1,0 +1,27 @@
+[package]
+name = "meowping"
+version = "1.3.0"
+authors = ["enty"]
+edition = "2021"
+rust-version = "1.56"
+description = "A simple ping utility written in Rust"
+readme = "README.md"
+repository = "https://github.com/entytaiment25/meowping"
+
+build = "build.rs"
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s" # "z" for other size optimization
+panic = "abort"
+strip = true
+
+[dependencies]
+clap = "4.5.0" #3.2.25 old version
+
+[target.'cfg(windows)'.build-dependencies]
+windres = "0.2.2"
