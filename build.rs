@@ -32,10 +32,14 @@ fn main() {
 #define VERSION_DESCRIPTION  \"{description}\"
 #define VERSION_NAME \"{name}\"
 "
-        )
-    ).unwrap();
+        ),
+    )
+    .unwrap();
 
-    Build::new().include(out_dir).compile("resources.rc").unwrap();
+    Build::new()
+        .include(out_dir)
+        .compile("resources.rc")
+        .unwrap();
 
     // println!("cargo:rerun-if-changed=resources.rc"); // windres already does this
     //println!("cargo:rerun-if-changed=hank.ico");

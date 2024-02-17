@@ -12,6 +12,7 @@ https://github.com/TimonPost/cargo-unused-features
 https://github.com/llogiq/momo
 https://rustwasm.github.io/twiggy/index.html
 
+tcping = connected to 1.1.1.1 ASN time 53ms port: 80 protocol: TCP
 
 cargo build --release; cd C:\Users\enty; .\upx.exe --best --lzma 'C:\Users\enty\Documents\Hosting\FIVEM\OwnStuff\JOURNEY\AuthPY\MeowPing\NEW\target\release/kittyping.exe'; cd C:\Users\enty\Documents\Hosting\FIVEM\OwnStuff\JOURNEY\AuthPY\MeowPing\NEW
 
