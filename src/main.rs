@@ -1,13 +1,17 @@
-use clap::{ Arg, ArgAction, Command };
+use clap::{Arg, ArgAction, Command};
+use json::parse;
 use std::collections::VecDeque;
-use std::net::{ SocketAddr, TcpStream };
+use std::net::{SocketAddr, TcpStream};
 use std::thread::sleep;
-use std::time::{ Duration, Instant };
+use std::time::{Duration, Instant};
 
 mod colors;
+use colors::fix_ansicolor;
 use colors::Colorize;
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(target_os = "windows")]
+    fix_ansicolor::enable_ansi_support();
     let version = env!("CARGO_PKG_VERSION");
     let version_format = format!("v.{}", env!("CARGO_PKG_VERSION"));
     let name: &str = &env!("CARGO_PKG_NAME");
@@ -20,7 +24,12 @@ fn main() {
         .arg(Arg::new("port").short('p').long("port").required(true))
         .arg(Arg::new("timeout").short('t').long("timeout"))
         .arg(Arg::new("count").short('c').long("count"))
-        .arg(Arg::new("nocolor").short('n').long("nocolor").action(ArgAction::SetTrue))
+        .arg(
+            Arg::new("nocolor")
+                .short('n')
+                .long("nocolor")
+                .action(ArgAction::SetTrue),
+        )
         .get_matches();
 
     let destination = matches
@@ -49,8 +58,14 @@ fn main() {
 
     if !nocolor {
         println!("{}", "  ／l、             ".magenta());
-        println!("{}", format!("（ﾟ､ ｡ ７      welcome to {}!   ", name).magenta());
-        println!("{}", format!("  l  ~ヽ        {}   ", version_format).magenta());
+        println!(
+            "{}",
+            format!("（ﾟ､ ｡ ７      welcome to {}!   ", name).magenta()
+        );
+        println!(
+            "{}",
+            format!("  l  ~ヽ        {}   ", version_format).magenta()
+        );
         println!("{}", "  じしf_,)ノ        \n".magenta());
     } else {
         println!("  ／l、             ");
@@ -60,11 +75,25 @@ fn main() {
     }
 
     let protocol_port = format!("TCP {}", port).yellow();
+    // get asn
+    let url = format!("http://ip-api.com/json/{}?fields=2048", destination);
+    let response = ureq::get(&url).call()?.into_string()?;
+    let parsed_json = parse(&response)?;
+    let asn = parsed_json["as"].to_string();
+    let format_asn = format!("ASN: {}", asn).yellow();
 
     if !nocolor {
-        println!("Connecting to {} on {}:", destination.yellow(), protocol_port);
+        println!(
+            "Connecting to {} on {}, {}",
+            destination.yellow(),
+            protocol_port,
+            format_asn
+        );
     } else {
-        println!("Connecting to {} on TCP {}:", destination, port);
+        println!(
+            "Connecting to {} on TCP {}, ASN: {}",
+            destination, port, asn
+        );
     }
 
     let mut times = VecDeque::new();
@@ -72,12 +101,13 @@ fn main() {
 
     for _ in 0..count {
         let start = Instant::now();
-        match
-            TcpStream::connect_timeout(
-                &SocketAddr::new(destination.parse().expect("Invalid destination address"), port),
-                Duration::from_millis(timeout)
-            )
-        {
+        match TcpStream::connect_timeout(
+            &SocketAddr::new(
+                destination.parse().expect("Invalid destination address"),
+                port,
+            ),
+            Duration::from_millis(timeout),
+        ) {
             Ok(_) => {
                 let duration = start.elapsed().as_millis();
                 times.push_back(duration);
@@ -93,9 +123,7 @@ fn main() {
                 } else {
                     println!(
                         "Connected to {}: time={} protocol=TCP port={}",
-                        destination,
-                        duration,
-                        port
+                        destination, duration, port
                     );
                 }
                 sleep(Duration::from_secs(1));
@@ -118,7 +146,11 @@ fn main() {
     let failed = attempted - successes;
     let min_time = times.iter().min().unwrap_or(&0);
     let max_time = times.iter().max().unwrap_or(&0);
-    let avg_time = if successes > 0 { times.iter().sum::<u128>() / (successes as u128) } else { 0 };
+    let avg_time = if successes > 0 {
+        times.iter().sum::<u128>() / (successes as u128)
+    } else {
+        0
+    };
 
     if !nocolor {
         println!("\nConnection statistics:");
@@ -136,6 +168,7 @@ fn main() {
             format!("{}ms", max_time).blue(),
             format!("{}ms", avg_time).blue()
         );
+        Ok(())
     } else {
         println!("\nConnection statistics:");
         println!(
@@ -148,9 +181,8 @@ fn main() {
         println!("Approximate connection times:");
         println!(
             "        Minimum = {}ms, Maximum = {}ms, Average = {}ms",
-            min_time,
-            max_time,
-            avg_time
+            min_time, max_time, avg_time
         );
+        Ok(())
     }
 }

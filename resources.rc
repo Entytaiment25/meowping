@@ -27,7 +27,7 @@ BEGIN
             VALUE "FileVersion", VERSION_FULL
             VALUE "InternalName", VERSION_NAME
             VALUE "LegalCopyright", "Copyright (C) enty 2024"
-            VALUE "OriginalFilename", "kittyping.exe"
+            VALUE "OriginalFilename", VERSION_NAME
             VALUE "ProductName", VERSION_NAME
             VALUE "ProductVersion", VERSION_FULL
         END
