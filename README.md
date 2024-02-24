@@ -1,4 +1,3 @@
 # meowping
 
-Websites sollen auch gehen. http/s oder w/o twitch.tv as ex.
-Linux Support? only on request
+build.ps1 is for optional upx compression if you depend on file size, not recommend for Antivirus enjoyers (they don't like that)
