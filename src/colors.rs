@@ -1,6 +1,6 @@
 #[cfg(target_os = "windows")]
 pub mod fix_ansicolor {
-    use winapi::um::consoleapi::{GetConsoleMode, SetConsoleMode};
+    use winapi::um::consoleapi::{ GetConsoleMode, SetConsoleMode };
     use winapi::um::processenv::GetStdHandle;
     use winapi::um::winbase::STD_OUTPUT_HANDLE;
     use winapi::um::wincon::ENABLE_VIRTUAL_TERMINAL_PROCESSING;

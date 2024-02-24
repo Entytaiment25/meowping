@@ -5,7 +5,7 @@ cargo build --release
 Set-Location -Path C:\Users\enty
 
 # Run UPX to compress the executable
-.\upx.exe --best --lzma 'C:\Users\enty\Hosting\FIVEM\OwnStuff\JOURNEY\AuthPY\rsping\NEW\target\release\meowping.exe'
+.\upx.exe --best --lzma 'C:\Users\enty\Documents\Hosting\FIVEM\OwnStuff\JOURNEY\AuthPY\MeowPing\NEW\target\release\meowping.exe'
 
 # Change directory back to the project folder
-Set-Location -Path 'C:\Users\enty\Hosting\FIVEM\OwnStuff\JOURNEY\AuthPY\rsping\NEW'
+Set-Location -Path 'C:\Users\enty\Documents\Hosting\FIVEM\OwnStuff\JOURNEY\AuthPY\MeowPing\NEW'
