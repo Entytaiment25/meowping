@@ -1,0 +1,22 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "duck" ]
+  pull_request:
+    branches: [ "duck" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+
+    runs-on: windows-latest
+
+    steps:
+    - uses: dtolnay/rust-toolchain@stable
+    - name: Build
+      run: cargo build --verbose
+    - name: Run tests
+      run: cargo test --verbose
