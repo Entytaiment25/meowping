@@ -16,6 +16,9 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - uses: taiki-e/install-action@cargo-hack
+    - name: Check
+      run: cargo hack check --rust-version --all-targets --ignore-private
     - name: Build
       run: cargo build --verbose
     - name: Run tests
