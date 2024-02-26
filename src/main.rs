@@ -60,17 +60,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let destination = if destination.starts_with("https://") {
         if destination.ends_with('/') {
-            destination.strip_prefix("https://").unwrap()
-            .strip_suffix('/').unwrap()
+            destination.strip_prefix("https://").unwrap().strip_suffix('/').unwrap()
         } else {
-        destination.strip_prefix("https://").unwrap()
+            destination.strip_prefix("https://").unwrap()
         }
     } else if destination.starts_with("http://") {
         if destination.ends_with('/') {
-            destination.strip_prefix("http://").unwrap()
-            .strip_suffix('/').unwrap()
+            destination.strip_prefix("http://").unwrap().strip_suffix('/').unwrap()
         } else {
-        destination.strip_prefix("http://").unwrap()
+            destination.strip_prefix("http://").unwrap()
         }
     } else {
         destination
