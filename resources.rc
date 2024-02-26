@@ -22,11 +22,11 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName", "enty"
+            VALUE "CompanyName", "Entytaiment25"
             VALUE "FileDescription", VERSION_DESCRIPTION
             VALUE "FileVersion", VERSION_FULL
             VALUE "InternalName", VERSION_NAME
-            VALUE "LegalCopyright", "Copyright (C) enty 2024"
+            VALUE "LegalCopyright", "Copyright (C) Entytaiment25 2024"
             VALUE "OriginalFilename", VERSION_NAME
             VALUE "ProductName", VERSION_NAME
             VALUE "ProductVersion", VERSION_FULL
