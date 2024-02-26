@@ -1,7 +1,7 @@
 [package]
 name = "meowping"
-version = "1.6.3"
-authors = ["enty"]
+version = "1.6.4"
+authors = ["Entytaiment25"]
 edition = "2021"
 rust-version = "1.76"
 description = "A simple ping utility written in Rust, that is focused on being size efficient and fast."
@@ -19,15 +19,20 @@ overflow-checks = false
 codegen-units = 1
 lto = "fat"
 overflow-checks = true
-opt-level = "s" # "z" for other size optimization
+opt-level = "s"        # "z" for other size optimization
 panic = "abort"
 strip = "symbols"
 
 [dependencies]
-clap = "4.5.1" #3.2.25 old version
-json = {version = "0.12.4", default-features = false}
-ureq = {version = "2.9.6", default-features = false}
-winapi = { version = "0.3.9", default-features = false, features = ["consoleapi", "processenv", "winbase", "wincon"] }
+clap = "4.5.1"
+json = { version = "0.12.4", default-features = false }
+ureq = { version = "2.9.6", default-features = false }
+winapi = { version = "0.3.9", default-features = false, features = [
+    "consoleapi",
+    "processenv",
+    "winbase",
+    "wincon",
+] }
 
 [target.'cfg(windows)'.build-dependencies]
 windres = "0.2.2"
