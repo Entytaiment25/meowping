@@ -6,8 +6,10 @@ use std::thread::sleep;
 use std::time::{ Duration, Instant };
 
 mod colors;
-use colors::fix_ansicolor;
 use colors::Colorize;
+
+#[cfg(target_os = "windows")]
+use colors::fix_ansicolor;
 
 fn get_arg<T: AsRef<str>>(matches: &ArgMatches, key: T) -> Option<&str> {
     matches.get_one::<String>(key.as_ref()).map(|s| s.as_str())
