@@ -60,20 +60,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("{}", message);
 
-    let destination = if destination.starts_with("https://") {
-        if destination.ends_with('/') {
-            destination.strip_prefix("https://").unwrap().strip_suffix('/').unwrap()
-        } else {
-            destination.strip_prefix("https://").unwrap()
+    let destination = match
+        destination.strip_prefix("https://").or_else(|| destination.strip_prefix("http://"))
+    {
+        Some(without_protocol) => {
+            without_protocol
+                .split_once('/')
+                .map(|(before, _)| before)
+                .unwrap_or(without_protocol)
         }
-    } else if destination.starts_with("http://") {
-        if destination.ends_with('/') {
-            destination.strip_prefix("http://").unwrap().strip_suffix('/').unwrap()
-        } else {
-            destination.strip_prefix("http://").unwrap()
-        }
-    } else {
-        destination
+        None => destination,
     };
 
     let with_port = format!("{}:{}", destination, port);
