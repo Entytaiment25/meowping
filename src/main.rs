@@ -157,7 +157,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok({
         println!("\nConnection statistics:");
         println!(
-            "        Attempted = {}, Connected = {}, Failed = {} ({} loss)",
+            "\tAttempted = {}, Connected = {}, Failed = {} ({} loss)",
             attempted.to_string().blue(),
             successes.to_string().blue(),
             failed.to_string().blue(),
@@ -165,7 +165,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         println!("Approximate connection times:");
         println!(
-            "        Minimum = {}, Maximum = {}, Average = {}",
+            "\tMinimum = {}, Maximum = {}, Average = {}",
             format!("{:.2}ms", min_time).blue(),
             format!("{:.2}ms", max_time).blue(),
             format!("{:.2}ms", avg_time).blue()
