@@ -23,7 +23,7 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName", VERSION_AUTHOR
-            VALUE "FileDescription", VERSION_DESCRIPTION
+            VALUE "FileDescription", VERSION_NAME //Windows is wierd so this is smh the name..
             VALUE "FileVersion", VERSION_FULL
             VALUE "InternalName", VERSION_NAME
             VALUE "LegalCopyright", "Copyright (C) Entytaiment25 2024"
