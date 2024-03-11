@@ -1,19 +1,20 @@
-use clap::{ Arg, ArgMatches, Command };
 use json::parse;
+use pico_args::Arguments;
 use std::collections::VecDeque;
-use std::net::{ SocketAddr, TcpStream, ToSocketAddrs };
+use std::error::Error;
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::thread::sleep;
-use std::time::{ Duration, Instant };
+use std::time::{Duration, Instant};
 
 mod colors;
+mod parser;
 use colors::Colorize;
+use parser::extract_url;
 
 #[cfg(target_os = "windows")]
 use colors::fix_ansicolor;
 
-fn get_arg<T: AsRef<str>>(matches: &ArgMatches, key: T) -> Option<&str> {
-    matches.get_one::<String>(key.as_ref()).map(|s| s.as_str())
-}
+use crate::parser::Extracted;
 
 fn link<T: Into<String>>(url: T) -> String {
     let url = url.into();
@@ -21,55 +22,66 @@ fn link<T: Into<String>>(url: T) -> String {
     format!("\u{1b}]8;;{}\u{1b}\\{}\u{1b}]8;;\u{1b}\\", url, url)
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(target_os = "windows")]
     fix_ansicolor::enable_ansi_support();
-    let version = env!("CARGO_PKG_VERSION");
     let version_format = format!("v.{}", env!("CARGO_PKG_VERSION"));
     let name = env!("CARGO_PKG_NAME");
-    let description = env!("CARGO_PKG_DESCRIPTION");
 
-    let matches = Command::new(name)
-        .version(version)
-        .about(description)
-        .arg(Arg::new("destination").required(true).index(1))
-        .arg(Arg::new("port").short('p').long("port").required(true))
-        .arg(Arg::new("timeout").short('t').long("timeout").default_value("1000"))
-        .arg(Arg::new("count").short('c').long("count").default_value("99999"))
-        .get_matches();
+    let mut args = Arguments::from_env();
 
-    let destination = get_arg(&matches, "destination").unwrap();
-    let port = get_arg(&matches, "port").unwrap().parse::<u16>().expect("Invalid port number");
-    let timeout = get_arg(&matches, "timeout")
+    if args.contains(["-h", "--help"]) {
+        println!("Usage: {} [options] <destination>", name);
+        println!();
+        println!("Options:");
+        println!("    -h, --help         Print this help menu");
+        println!("    -p, --port <port>  Set the port number (required)");
+        println!("    -t, --timeout <timeout>  Set the timeout value (default: 1000)");
+        println!("    -c, --count <count>  Set the count value (default: 99999)");
+
+        return Ok(());
+    }
+
+    let destination = args.free_from_str::<String>().unwrap();
+    let port = args
+        .opt_value_from_str(["-p", "--port"])
         .unwrap()
-        .parse::<u64>()
-        .expect("Invalid timeout value");
-    let count = get_arg(&matches, "count").unwrap().parse::<usize>().expect("Invalid count value");
+        .expect("Port number is required");
+    let timeout = args
+        .opt_value_from_str(["-t", "--timeout"])
+        .unwrap()
+        .unwrap_or(1000);
+    let count = args
+        .opt_value_from_str(["-c", "--count"])
+        .unwrap()
+        .unwrap_or(99999);
 
     let message = format!(
         "
-    ／l、             
-  （ﾟ､ ｡ ７      welcome to {} ({})!   
-    l  ~ヽ       {}   
+    ／l、
+  （ﾟ､ ｡ ７      welcome to {} ({})!
+    l  ~ヽ       {}
     じしf_,)ノ
 ",
         name,
         link("https://github.com/entytaiment25/meowping"),
         version_format
-    ).magenta();
+    )
+    .magenta();
 
     println!("{}", message);
 
-    let destination = match
-        destination.strip_prefix("https://").or_else(|| destination.strip_prefix("http://"))
-    {
-        Some(without_protocol) => {
-            without_protocol
-                .split_once('/')
-                .map(|(before, _)| before)
-                .unwrap_or(without_protocol)
+    let destination = match extract_url(&destination) {
+        Extracted::Error() => {
+            println!(
+                "{} {}",
+                "[MEOWPING]".magenta(),
+                "DNS Lookup of domain failed :(",
+            );
+
+            return Ok(());
         }
-        None => destination,
+        Extracted::Success(host) => host,
     };
 
     let with_port = format!("{}:{}", destination, port);
@@ -93,7 +105,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // get asn
     let url = format!("http://ip-api.com/json/{}?fields=2048", ip_lookup.ip());
-    let response = ureq::get(&url).call()?.into_string()?;
+    let response = attohttpc::get(&url).send()?.text()?;
     let parsed_json = parse(&response)?;
     let asn = parsed_json["as"].to_string();
 
@@ -105,7 +117,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let connect_result = TcpStream::connect_timeout(
             &SocketAddr::new(ip_lookup.ip(), port),
-            Duration::from_millis(timeout)
+            Duration::from_millis(timeout),
         );
 
         let duration = start.elapsed().as_micros();
@@ -145,14 +157,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let failed = attempted - successes;
     let min_time = (*times.iter().min().unwrap_or(&0) as f32) / 1000.0;
     let max_time = (*times.iter().max().unwrap_or(&0) as f32) / 1000.0;
-    let avg_time =
-        (
-            (if successes > 0 {
-                times.iter().sum::<u128>() / (successes as u128)
-            } else {
-                0
-            }) as f32
-        ) / 1000.0;
+    let avg_time = ((if successes > 0 {
+        times.iter().sum::<u128>() / (successes as u128)
+    } else {
+        0
+    }) as f32)
+        / 1000.0;
 
     Ok({
         println!("\nConnection statistics:");
