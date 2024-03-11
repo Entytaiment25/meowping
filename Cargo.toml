@@ -1,9 +1,11 @@
 [package]
 name = "meowping"
-version = "1.6.6"
+version = "1.6.7"
 authors = ["Entytaiment25"]
 edition = "2021"
 rust-version = "1.76"
+categories = ["networking", "ping", "utility"]
+keywords = ["ping", "utility", "networking", "meowping"]
 description = "A simple ping utility written in Rust, that is focused on being size efficient and fast."
 readme = "README.md"
 license = "MIT"
@@ -19,15 +21,15 @@ overflow-checks = false
 codegen-units = 1
 lto = "fat"
 overflow-checks = true
-opt-level = "s"        # "z" for other size optimization
+opt-level = "z"        # "z" for other size optimization
 panic = "abort"
 strip = "symbols"
 
 [dependencies]
-clap = "4.5.1"
+url = { version = "2.5.0", default-features = false }
+pico-args = { version = "0.5.0", default-features = false }
+attohttpc = { version = "0.27.0", default-features = false }
 json = { version = "0.12.4", default-features = false }
-ureq = { version = "2.9.6", default-features = false }
-
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3.9", default-features = false, features = [
     "consoleapi",
