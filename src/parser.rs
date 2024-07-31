@@ -1,4 +1,4 @@
-use url::{Host, Url};
+use url::{ Host, Url };
 
 pub enum Extracted {
     Success(String),
