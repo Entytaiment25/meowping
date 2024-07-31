@@ -13,7 +13,7 @@ mod windows {
     use std::path::Path;
 
     use windres::Build;
-    
+
     pub fn compile_resources_file() {
         let out_dir = env::var_os("OUT_DIR").unwrap();
         let resource_header = Path::new(&out_dir).join("versions.h");
