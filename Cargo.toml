@@ -1,16 +1,21 @@
 [package]
 name = "meowping"
-version = "1.6.7"
+version = "1.6.9"
 authors = ["Entytaiment25"]
 edition = "2021"
 rust-version = "1.76"
-categories = ["networking", "ping", "utility"]
-keywords = ["ping", "utility", "networking", "meowping"]
 description = "A simple ping utility written in Rust, that is focused on being size efficient and fast."
-readme = "README.md"
-license = "MIT"
 repository = "https://github.com/entytaiment25/meowping"
-
+license = "MIT"
+keywords = [
+    "ping",
+    "utility",
+    "networking",
+    "meowping",
+    "command-line-utilities",
+]
+categories = ["networking", "ping", "utility", "command-line-utilities"]
+readme = "README.md"
 build = "build.rs"
 
 [profile.dev]
@@ -21,15 +26,20 @@ overflow-checks = false
 codegen-units = 1
 lto = "fat"
 overflow-checks = true
-opt-level = "z"        # "z" for other size optimization
+opt-level = "s"        # "z" for other size optimization
 panic = "abort"
 strip = "symbols"
 
 [dependencies]
-url = { version = "2.5.0", default-features = false }
+url = { version = "2.5.2", default-features = false }
 pico-args = { version = "0.5.0", default-features = false }
-attohttpc = { version = "0.27.0", default-features = false }
+attohttpc = { version = "0.28.0", features = [
+    'tls-native',
+], default-features = false }
 json = { version = "0.12.4", default-features = false }
+ping = { version = "0.5.2", default-features = false }
+anyhow = "1.0.86"
+
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3.9", default-features = false, features = [
     "consoleapi",
