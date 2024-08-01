@@ -3,6 +3,8 @@ use std::net::{ SocketAddr, TcpStream, ToSocketAddrs };
 use std::time::{ Duration, Instant };
 use std::thread::sleep;
 use anyhow::Result;
+use minreq;
+use jzon::JsonValue;
 use crate::colors::Colorize;
 
 pub fn perform_tcp(destination: &str, port: u16, timeout: u64, count: usize) -> Result<()> {
@@ -26,8 +28,9 @@ pub fn perform_tcp(destination: &str, port: u16, timeout: u64, count: usize) -> 
 
     // Get ASN
     let url = format!("https://ipinfo.io/{}/json", ip_lookup.ip());
-    let response = attohttpc::get(&url).send()?.text()?;
-    let parsed_json = json::parse(&response)?;
+    let response = minreq::get(&url).send()?;
+    let response_text = response.as_str()?;
+    let parsed_json: JsonValue = jzon::parse(&response_text)?;
     let asn = parsed_json["org"].as_str().unwrap_or("ASN not found").to_string();
 
     let mut times = VecDeque::new();

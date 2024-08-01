@@ -31,14 +31,16 @@ panic = "abort"
 strip = "symbols"
 
 [dependencies]
-url = { version = "2.5.2", default-features = false }
-pico-args = { version = "0.5.0", default-features = false }
-attohttpc = { version = "0.28.0", features = [
-    'tls-native',
-], default-features = false }
-json = { version = "0.12.4", default-features = false }
-ping = { version = "0.5.2", default-features = false }
-anyhow = "1.0.86"
+url = { version = "2.5.2", default-features = false } # no dependencies
+pico-args = { version = "0.5.0", default-features = false } # no dependencies
+jzon = { version = "0.12.5", default-features = false } # no dependencies
+ping = { version = "0.5.2", default-features = false } # 3 dependencies
+anyhow = "1.0.86" # no dependencies
+minreq = { version = "2.12.0", features = [
+    "https",
+    "https-native",
+    "punycode",
+] } # 1 dependencies
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3.9", default-features = false, features = [
@@ -46,7 +48,7 @@ winapi = { version = "0.3.9", default-features = false, features = [
     "processenv",
     "winbase",
     "wincon",
-] }
+] } # 2 dependencies
 
 [target.'cfg(windows)'.build-dependencies]
-windres = "0.2.2"
+windres = "0.2.2" # 2 dependencies
