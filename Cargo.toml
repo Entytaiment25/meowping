@@ -38,8 +38,6 @@ ping = { version = "0.5.2", default-features = false } # 3 dependencies
 anyhow = "1.0.86" # no dependencies
 minreq = { version = "2.12.0", features = [
     "https",
-    "https-native",
-    "punycode",
 ] } # 1 dependencies
 
 [target.'cfg(windows)'.dependencies]
