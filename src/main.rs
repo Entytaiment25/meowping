@@ -6,6 +6,7 @@ mod colors;
 mod icmp;
 mod parser;
 mod tcp;
+mod https;
 use colors::Colorize;
 use icmp::perform_icmp;
 use parser::extract_url;
@@ -85,12 +86,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let destination = match extract_url(&destination) {
         Extracted::Error() => {
+            let message = "DNS Lookup of domain failed: Invalid host or URL";
             if !minimal {
-                println!(
-                    "{} {}",
-                    "[MEOWPING]".magenta(),
-                    "DNS Lookup of domain failed: Invalid host or URL"
-                );
+                println!("{} {}", "[MEOWPING]".magenta(), message);
+            } else {
+                println!("{}", message);
             }
             return Ok(());
         }
@@ -98,12 +98,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     match port {
-        Ok(Some(p)) => perform_tcp(&destination, p, timeout, count.into())?,
+        Ok(Some(p)) => perform_tcp(&destination, p, timeout, count.into(), minimal)?,
         Ok(None) => {
             let ttl = 64;
             let ident = 0;
             let custom_payload = b"...meow...meow...meow..."; // 24-byte custom payload
-            perform_icmp(&destination, timeout, ttl, ident, count, custom_payload)?;
+            perform_icmp(&destination, timeout, ttl, ident, count, custom_payload, minimal)?;
         }
         Err(_) => {
             return Err("Failed to parse port argument".into());

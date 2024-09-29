@@ -3,38 +3,46 @@ use std::net::{ SocketAddr, TcpStream, ToSocketAddrs };
 use std::time::{ Duration, Instant };
 use std::thread::sleep;
 use anyhow::Result;
-use minreq;
 use jzon::JsonValue;
 use crate::colors::Colorize;
+use crate::https::{ self };
 
-pub fn perform_tcp(destination: &str, port: u16, timeout: u64, count: usize) -> Result<()> {
+pub fn perform_tcp(
+    destination: &str,
+    port: u16,
+    timeout: u64,
+    count: usize,
+    minimal: bool
+) -> Result<()> {
     let with_port = format!("{}:{}", destination, port);
     let ip_lookup = with_port
         .to_socket_addrs()?
         .next()
-        .expect("Unable to find IP address from domain using default DNS lookup.");
+        .ok_or_else(||
+            anyhow::anyhow!("Unable to find IP address from domain using default DNS lookup.")
+        )?;
 
     if ip_lookup.ip().to_string() != destination {
-        println!(
-            "{} {}",
-            "[MEOWPING]".magenta(),
-            format!(
-                "Found IP address of domain {}: {}",
-                destination.green(),
-                ip_lookup.ip().to_string().green()
-            )
+        let message = format!(
+            "Found IP address of domain {}: {}",
+            destination.green(),
+            ip_lookup.ip().to_string().green()
         );
+        println!("{}", if minimal {
+            message
+        } else {
+            format!("{} {}", "[MEOWPING]".magenta(), message)
+        });
     }
 
     // Get ASN
     let url = format!("https://ipinfo.io/{}/json", ip_lookup.ip());
-    let response = minreq::get(&url).send()?;
-    let response_text = response.as_str()?;
+    let response_text = https::get(&url).map_err(|e| anyhow::anyhow!(e.to_string()))?;
     let parsed_json: JsonValue = jzon::parse(&response_text)?;
     let asn = parsed_json["org"].as_str().unwrap_or("ASN not found").to_string();
 
-    let mut times = VecDeque::new();
-    let mut successes = 0;
+    let mut times = VecDeque::with_capacity(count);
+    let successes = 0;
 
     for _ in 0..count {
         let start = Instant::now();
@@ -46,49 +54,47 @@ pub fn perform_tcp(destination: &str, port: u16, timeout: u64, count: usize) -> 
 
         let duration = start.elapsed().as_micros();
         times.push_back(duration);
-        successes += 1;
 
-        let duration = (duration as f32) / 1000.0;
-        match connect_result {
-            Ok(_) => {
-                println!(
-                    "{} Connected to {} ({}): time={} protocol={} port={}",
-                    "[MEOWPING]".magenta(),
+        let duration_ms = (duration as f32) / 1000.0;
+        let status_message = match connect_result {
+            Ok(_) =>
+                format!(
+                    "{} ({}): {} protocol={} port={}",
                     destination.green(),
                     asn.green(),
-                    format!("{:.2}ms", duration).green(),
+                    format!("{:.2}ms", duration_ms).green(),
                     "TCP".green(),
                     port.to_string().green()
-                );
-                sleep(Duration::from_secs(1));
-            }
-            Err(_) => {
-                println!(
-                    "{} Connection to {} timed out ({}): time={} protocol={} port={}",
-                    "[MEOWPING]".magenta(),
+                ),
+            Err(_) =>
+                format!(
+                    "{} timed out ({}): time={} protocol={} port={}",
                     destination.red(),
                     asn.red(),
-                    format!("{:.2}ms", duration).red(),
+                    format!("{:.2}ms", duration_ms).red(),
                     "TCP".red(),
                     port.to_string().red()
-                );
-                sleep(Duration::from_secs(1));
-            }
-        }
+                ),
+        };
+
+        println!("{}", if minimal {
+            status_message
+        } else {
+            format!("{} Connected to {}", "[MEOWPING]".magenta(), status_message)
+        });
+
+        sleep(Duration::from_secs(1));
     }
 
     let attempted = count;
     let failed = attempted - successes;
     let min_time = (*times.iter().min().unwrap_or(&0) as f32) / 1000.0;
     let max_time = (*times.iter().max().unwrap_or(&0) as f32) / 1000.0;
-    let avg_time =
-        (
-            (if successes > 0 {
-                times.iter().sum::<u128>() / (successes as u128)
-            } else {
-                0
-            }) as f32
-        ) / 1000.0;
+    let avg_time = if successes > 0 {
+        (times.iter().sum::<u128>() as f32) / (successes as f32) / 1000.0
+    } else {
+        0.0
+    };
 
     println!("\nConnection statistics:");
     println!(
