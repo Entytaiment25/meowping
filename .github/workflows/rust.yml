@@ -1,10 +1,6 @@
 name: Rust
 
-on:
-  push:
-    branches: ["duck"]
-  pull_request:
-    branches: ["duck"]
+on: [push, pull_request]
 
 env:
   CARGO_TERM_COLOR: always
