@@ -36,6 +36,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          echo "OPENSSL_DIR=C:\Program Files\OpenSSL" >> $GITHUB_ENV
 
       - name: Build binary and create archive
         shell: bash
