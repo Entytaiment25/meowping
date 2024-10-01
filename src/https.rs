@@ -9,13 +9,7 @@ pub fn get(url: &str) -> Result<String, Box<dyn std::error::Error>> {
     let port = parsed_url.port.unwrap_or(443);
     let path = &parsed_url.path;
 
-    let address = if host.contains(':') {
-        format!("[{}]:{}", host, port)
-    } else {
-        format!("{}:{}", host, port)
-    };
-
-    let stream = TcpStream::connect(address)?;
+    let stream = TcpStream::connect((host.as_str(), port))?;
     let connector = TlsConnector::new()?;
     let mut ssl_stream = connector.connect(host, stream)?;
 
