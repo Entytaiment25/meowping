@@ -1,21 +1,19 @@
 use anyhow::Result;
 use pico_args::Arguments;
-use std::error::Error;
+use std::{ error::Error, net::IpAddr };
 
 mod colors;
 mod icmp;
-mod parser;
 mod tcp;
 mod https;
+mod parser;
 use colors::Colorize;
 use icmp::perform_icmp;
-use parser::extract_url;
 use tcp::perform_tcp;
+use parser::{ Extracted, Parser };
 
 #[cfg(target_os = "windows")]
 use colors::fix_ansicolor;
-
-use crate::parser::Extracted;
 
 fn link<T: Into<String>>(url: T) -> String {
     let url = url.into();
@@ -84,17 +82,23 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("{}", message);
     }
 
-    let destination = match extract_url(&destination) {
-        Extracted::Error() => {
-            let message = "DNS Lookup of domain failed: Invalid host or URL";
-            if !minimal {
-                println!("{} {}", "[MEOWPING]".magenta(), message);
-            } else {
-                println!("{}", message);
+    let destination = if destination.starts_with('[') && destination.ends_with(']') {
+        destination[1..destination.len() - 1].to_string()
+    } else if destination.parse::<IpAddr>().is_ok() {
+        destination
+    } else {
+        match Parser::extract_url(&destination) {
+            Extracted::Error => {
+                let message = "DNS Lookup of domain failed: Invalid host or URL";
+                if !minimal {
+                    println!("{} {}", "[MEOWPING]".magenta(), message);
+                } else {
+                    println!("{}", message);
+                }
+                return Ok(());
             }
-            return Ok(());
+            Extracted::Success(host) => host,
         }
-        Extracted::Success(host) => host,
     };
 
     match port {

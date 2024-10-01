@@ -1,34 +1,51 @@
-use url::{ Host, Url };
+pub struct Parser {
+    pub host: String,
+    pub port: Option<u16>,
+    pub path: String,
+}
+
+impl Parser {
+    pub fn parse(url: &str) -> Result<Self, &'static str> {
+        let scheme_end = url.find("://");
+        let url = match scheme_end {
+            Some(end) => &url[end + 3..], // Skip over "://"
+            None => url,
+        };
+
+        let host_end = url.find('/').unwrap_or_else(|| url.len());
+
+        let host_port = &url[..host_end];
+        let path = if host_end < url.len() { &url[host_end..] } else { "/" };
+
+        let mut host = host_port;
+        let mut port = None;
+
+        if let Some(colon_pos) = host_port.find(':') {
+            host = &host_port[..colon_pos];
+            port = host_port[colon_pos + 1..].parse().ok();
+        }
+
+        if host.is_empty() {
+            return Err("Invalid host");
+        }
+
+        Ok(Parser {
+            host: host.to_string(),
+            port,
+            path: path.to_string(),
+        })
+    }
+
+    pub fn extract_url(input: &str) -> Extracted {
+        println!("Extracting URL from input: {}", input);
+        match Self::parse(input) {
+            Ok(parsed) => Extracted::Success(parsed.host),
+            Err(_) => Extracted::Error,
+        }
+    }
+}
 
 pub enum Extracted {
     Success(String),
-    Error(),
-}
-
-fn host_to_string<T: Into<String>>(host: Host<T>) -> String {
-    match host {
-        url::Host::Domain(domain) => domain.into(),
-        url::Host::Ipv4(ipv4) => ipv4.to_string(),
-        url::Host::Ipv6(ipv6) => ipv6.to_string(),
-    }
-}
-
-pub fn extract_url(input: &str) -> Extracted {
-    let host = Host::parse(input);
-
-    if let Ok(host) = host {
-        return Extracted::Success(host_to_string(host));
-    } else {
-        let url = Url::parse(input);
-
-        if let Ok(url) = url {
-            let host = url.host();
-
-            if let Some(host) = host {
-                return Extracted::Success(host_to_string(host));
-            }
-        }
-    }
-
-    Extracted::Error()
+    Error,
 }
