@@ -26,7 +26,7 @@ OPTIONS:
     -p, --port <port>       Set the port number (default: ICMP, with: TCP)
     -t, --timeout <ms>      Set the timeout for each connection attempt in milliseconds (default: 1000ms)
     -c, --count <count>     Set the number of connection attempts (default: 65535)
-    -m, --minimal           Changes the Prints to be more Minimal (WiP)
+    -m, --minimal           Changes the Prints to be more Minimal
 ```
 
 ### Example Usage
