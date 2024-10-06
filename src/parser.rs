@@ -37,7 +37,6 @@ impl Parser {
     }
 
     pub fn extract_url(input: &str) -> Extracted {
-        println!("Extracting URL from input: {}", input);
         match Self::parse(input) {
             Ok(parsed) => Extracted::Success(parsed.host),
             Err(_) => Extracted::Error,
