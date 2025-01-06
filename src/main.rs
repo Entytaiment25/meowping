@@ -30,14 +30,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut args = Arguments::from_env();
 
     if args.contains(["-h", "--help"]) {
-        println!("Usage: {} [options] <destination>", name);
-        println!();
+        println!("Usage: {} <destination> [options]\n", name);
         println!("Optional Options:");
-        println!("    -h, --help         Print this help menu");
-        println!("    -p, --port <port>  Set the port number (default: ICMP, with: TCP)");
-        println!("    -t, --timeout <timeout>  Set the timeout value (default: 1000)");
-        println!("    -c, --count <count>  Set the count value (default: 65535)");
-        println!("    -m, --minimal      Enable minimal output mode");
+        println!("{:>30}", "    -h, --help                Prints the Help Menu");
+        println!("{:>30}", "    -p, --port <port>         Set the port number (default: ICMP, with: TCP)");
+        println!("{:>30}", "    -t, --timeout <timeout>   Set the timeout for each connection attempt in milliseconds (default: 1000ms)");
+        println!("{:>30}", "    -c, --count <count>       Set the number of connection attempts (default: 65535)");
+        println!("{:>30}", "    -m, --minimal             Changes the Prints to be more Minimal");
         return Ok(());
     }
 
