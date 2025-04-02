@@ -2,8 +2,8 @@
 name = "meowping"
 version = "1.7.0"
 authors = ["Entytaiment25"]
-edition = "2021"
-rust-version = "1.82.0"
+edition = "2024"
+rust-version = "1.85.1"
 description = "A simple ping utility written in Rust, that is focused on being size efficient and fast."
 repository = "https://github.com/entytaiment25/meowping"
 license = "MIT"
