@@ -4,4 +4,5 @@ release/
 rls/
 *.o
 .vscode/
+.DS_Store
 docs/
