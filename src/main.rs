@@ -16,10 +16,24 @@ use https::get_status;
 #[cfg(target_os = "windows")]
 use colors::fix_ansicolor;
 
-fn check_http_status(url: &str) -> Result<String, Box<dyn Error>> {
+fn check_http_status(url: &str, minimal: bool) -> Result<String, Box<dyn Error>> {
     match get_status(url) {
-        Ok(status) => Ok(format!("{} is online. HTTP status: {}", url, status)),
-        Err(e) => Err(format!("Failed to connect to {}: {}", url, e).into()),
+        Ok(status) => {
+            let message = format!("{} is online. HTTP status: {}", url, status);
+            if minimal {
+                Ok(message)
+            } else {
+                Ok(format!("{} {}", "[MEOWPING]".magenta(), message))
+            }
+        }
+        Err(e) => {
+            let message = format!("Failed to connect to {}: {}", url, e);
+            if minimal {
+                Err(message.into())
+            } else {
+                Err(format!("{} {}", "[MEOWPING]".magenta(), message).into())
+            }
+        }
     }
 }
 
@@ -72,7 +86,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     if http_check {
-        match check_http_status(&destination) {
+        match check_http_status(&destination, minimal) {
             Ok(status) => {
                 println!("{}", status);
                 return Ok(());
