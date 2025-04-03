@@ -11,9 +11,17 @@ use colors::Colorize;
 use icmp::perform_icmp;
 use tcp::perform_tcp;
 use parser::{ Extracted, Parser };
+use https::get_status;
 
 #[cfg(target_os = "windows")]
 use colors::fix_ansicolor;
+
+fn check_http_status(url: &str) -> Result<String, Box<dyn Error>> {
+    match get_status(url) {
+        Ok(status) => Ok(format!("{} is online. HTTP status: {}", url, status)),
+        Err(e) => Err(format!("Failed to connect to {}: {}", url, e).into()),
+    }
+}
 
 fn link<T: Into<String>>(url: T) -> String {
     let url = url.into();
@@ -33,14 +41,28 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("Usage: {} <destination> [options]\n", name);
         println!("Optional Options:");
         println!("{:>30}", "    -h, --help                Prints the Help Menu");
-        println!("{:>30}", "    -p, --port <port>         Set the port number (default: ICMP, with: TCP)");
-        println!("{:>30}", "    -t, --timeout <timeout>   Set the timeout for each connection attempt in milliseconds (default: 1000ms)");
-        println!("{:>30}", "    -c, --count <count>       Set the number of connection attempts (default: 65535)");
+        println!(
+            "{:>30}",
+            "    -p, --port <port>         Set the port number (default: ICMP, with: TCP)"
+        );
+        println!(
+            "{:>30}",
+            "    -t, --timeout <timeout>   Set the timeout for each connection attempt in milliseconds (default: 1000ms)"
+        );
+        println!(
+            "{:>30}",
+            "    -c, --count <count>       Set the number of connection attempts (default: 65535)"
+        );
         println!("{:>30}", "    -m, --minimal             Changes the Prints to be more Minimal");
+        println!(
+            "{:>30}",
+            "    -s, --http              Check if the destination URL is online via HTTP/S"
+        );
         return Ok(());
     }
 
     let minimal = args.contains(["-m", "--minimal"]);
+    let http_check = args.contains(["-s", "--http"]);
 
     let destination = match args.free_from_str::<String>() {
         Ok(dest) => dest,
@@ -48,6 +70,20 @@ fn main() -> Result<(), Box<dyn Error>> {
             return Err("Destination argument missing".into());
         }
     };
+
+    if http_check {
+        match check_http_status(&destination) {
+            Ok(status) => {
+                println!("{}", status);
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("Failed to check HTTP status: {}", e);
+                return Err(e);
+            }
+        }
+    }
+
     let timeout = match args.opt_value_from_str(["-t", "--timeout"]) {
         Ok(Some(t)) => t,
         Ok(None) => 1000,
@@ -105,8 +141,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         Ok(None) => {
             let ttl = 64;
             let ident = 0;
-            let custom_payload = b"...meow...meow...meow..."; // 24-byte custom payload
-            perform_icmp(&destination, timeout, ttl, ident, count, custom_payload, minimal)?;
+            let payload = b"...meow...meow...meow...";
+            perform_icmp(&destination, timeout, ttl, ident, count, payload, minimal)?;
         }
         Err(_) => {
             return Err("Failed to parse port argument".into());

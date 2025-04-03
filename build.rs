@@ -43,9 +43,5 @@ mod windows {
         ).unwrap();
 
         Build::new().include(out_dir).compile("resources.rc").unwrap();
-
-        // println!("cargo:rerun-if-changed=resources.rc"); // windres already does this
-        //println!("cargo:rerun-if-changed=hank.ico");
-        println!("cargo:rerun-if-changed=app.manifest");
     }
 }

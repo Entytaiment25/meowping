@@ -24,6 +24,7 @@ ARGS:
 OPTIONS:
     -h, --help              Prints the Help Menu
     -p, --port <port>       Set the port number (default: ICMP, with: TCP)
+    -s, --http              Check if the destination URL is online via HTTP/S
     -t, --timeout <ms>      Set the timeout for each connection attempt in milliseconds (default: 1000ms)
     -c, --count <count>     Set the number of connection attempts (default: 65535)
     -m, --minimal           Changes the Prints to be more Minimal
@@ -39,6 +40,13 @@ OPTIONS:
 
 ```powershell
 sudo setcap cap_net_raw+ep ./meowping
+```
+
+**For macOS Users**
+Run `meowping` with elevated privileges using `sudo` to enable ICMP functionality
+
+```bash
+sudo ./meowping
 ```
 
 ## Preview
