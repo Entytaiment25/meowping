@@ -27,7 +27,6 @@ pub mod fix_ansicolor {
 pub trait Colorize {
     fn green(&self) -> String;
     fn red(&self) -> String;
-    fn yellow(&self) -> String;
     fn blue(&self) -> String;
     fn magenta(&self) -> String;
     fn color(&self, color_code: &str) -> String;
@@ -40,10 +39,6 @@ impl Colorize for &str {
 
     fn red(&self) -> String {
         self.color("\x1b[31m")
-    }
-
-    fn yellow(&self) -> String {
-        self.color("\x1b[33m")
     }
 
     fn blue(&self) -> String {
@@ -66,10 +61,6 @@ impl Colorize for String {
 
     fn red(&self) -> String {
         self.as_str().red()
-    }
-
-    fn yellow(&self) -> String {
-        self.as_str().yellow()
     }
 
     fn blue(&self) -> String {
