@@ -5,7 +5,7 @@ use crate::parser::Parser;
 
 fn build_request(host: &str, path: &str) -> String {
     format!(
-        "GET {} HTTP/1.1\r\n\
+        "GET {} HTTP/1.2\r\n\
         Host: {}\r\n\
         User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36\r\n\
         Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n\
