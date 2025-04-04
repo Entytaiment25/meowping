@@ -33,9 +33,7 @@ strip = "symbols"
 [dependencies]
 pico-args = { version = "0.5.0", default-features = false }
 ping = { version = "0.5.2", default-features = false }
-native-tls = { version = "0.2.14", default-features = false, features = [
-    "vendored",
-] }
+native-tls = "0.2.14"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3.9", default-features = false, features = [
