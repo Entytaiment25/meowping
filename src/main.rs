@@ -1,4 +1,3 @@
-use anyhow::Result;
 use pico_args::Arguments;
 use std::{ error::Error, net::IpAddr };
 
@@ -26,14 +25,7 @@ fn check_http_status(url: &str, minimal: bool) -> Result<String, Box<dyn Error>>
                 Ok(format!("{} {}", "[MEOWPING]".magenta(), message))
             }
         }
-        Err(e) => {
-            let message = format!("Failed to connect to {}: {}", url, e);
-            if minimal {
-                Err(message.into())
-            } else {
-                Err(format!("{} {}", "[MEOWPING]".magenta(), message).into())
-            }
-        }
+        Err(e) => Err(e),
     }
 }
 
@@ -92,7 +84,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 return Ok(());
             }
             Err(e) => {
-                eprintln!("Failed to check HTTP status: {}", e);
+                if minimal {
+                    eprintln!("{}", e);
+                } else {
+                    eprintln!("{} {}", "[MEOWPING]".magenta(), e);
+                }
                 return Err(e);
             }
         }

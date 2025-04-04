@@ -1,28 +1,46 @@
 use crate::colors::Colorize;
 use crate::https::{ self };
-use anyhow::Result;
+use std::error::Error;
+use std::fmt;
 use std::net::{ SocketAddr, TcpStream, ToSocketAddrs };
 use std::thread::sleep;
 use std::time::{ Duration, Instant };
 
-fn resolve_ip(destination: &str, port: u16) -> Result<SocketAddr> {
-    let with_port = format!("{}:{}", destination, port);
-    with_port
-        .to_socket_addrs()?
-        .next()
-        .ok_or_else(|| {
-            anyhow::anyhow!("Unable to find IP address from domain using default DNS lookup.")
-        })
+#[derive(Debug)]
+struct MeowpingError(String);
+
+impl fmt::Display for MeowpingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
 
-fn fetch_asn(ip: &str) -> Result<String> {
+impl Error for MeowpingError {}
+
+fn resolve_ip(destination: &str, port: u16) -> Result<SocketAddr, Box<dyn Error>> {
+    let with_port = format!("{}:{}", destination, port);
+    Ok(
+        with_port
+            .to_socket_addrs()?
+            .next()
+            .ok_or_else(||
+                Box::new(
+                    MeowpingError(
+                        "Unable to find IP address from domain using default DNS lookup.".to_string()
+                    )
+                )
+            )?
+    )
+}
+
+fn fetch_asn(ip: &str) -> Result<String, Box<dyn Error>> {
     let url = format!("https://ipinfo.io/{}/json", ip);
-    let response_text = https::get(&url).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    let response_text = https::get(&url).map_err(|e| Box::new(MeowpingError(e.to_string())))?;
 
     extract_asn_from_response(&response_text)
 }
 
-fn extract_asn_from_response(response_text: &str) -> Result<String> {
+fn extract_asn_from_response(response_text: &str) -> Result<String, Box<dyn Error>> {
     if let Some(start) = response_text.find("\"org\"") {
         let start = response_text[start..]
             .find(':')
@@ -36,7 +54,7 @@ fn extract_asn_from_response(response_text: &str) -> Result<String> {
             return Ok(response_text[start..start + end].trim().to_string());
         }
     }
-    Err(anyhow::anyhow!("ASN not found in response"))
+    Err(Box::new(MeowpingError("ASN not found in response".to_string())))
 }
 
 fn print_ip_info(destination: &str, ip: &str, minimal: bool) {
@@ -163,7 +181,7 @@ pub fn perform_tcp(
     timeout: u64,
     count: usize,
     minimal: bool
-) -> Result<()> {
+) -> Result<(), Box<dyn Error>> {
     let ip_lookup = resolve_ip(destination, port)?;
 
     if ip_lookup.ip().to_string() != destination {
