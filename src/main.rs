@@ -25,7 +25,14 @@ fn check_http_status(url: &str, minimal: bool) -> Result<String, Box<dyn Error>>
                 Ok(format!("{} {}", "[MEOWPING]".magenta(), message))
             }
         }
-        Err(e) => Err(e),
+        Err(e) => {
+            let error_msg = if minimal {
+                e.to_string()
+            } else {
+                format!("{} {}", "[MEOWPING]".magenta(), e)
+            };
+            Err(error_msg.into())
+        }
     }
 }
 
@@ -84,12 +91,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 return Ok(());
             }
             Err(e) => {
-                if minimal {
-                    eprintln!("{}", e);
-                } else {
-                    eprintln!("{} {}", "[MEOWPING]".magenta(), e);
-                }
-                return Err(e);
+                println!("{}", e);
+                return Ok(());
             }
         }
     }
