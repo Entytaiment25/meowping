@@ -18,25 +18,36 @@ impl fmt::Display for MeowpingError {
 impl Error for MeowpingError {}
 
 fn resolve_ip(destination: &str, port: u16) -> Result<SocketAddr, Box<dyn Error>> {
+    if let Ok(ip) = destination.parse::<std::net::IpAddr>() {
+        return Ok(SocketAddr::new(ip, port));
+    }
     let with_port = format!("{}:{}", destination, port);
     Ok(
         with_port
             .to_socket_addrs()?
             .next()
             .ok_or_else(||
-                Box::new(
-                    MeowpingError(
-                        "Unable to find IP address from domain using default DNS lookup.".to_string()
-                    )
-                )
+                Box::new(MeowpingError("Unable to find IP address from domain.".to_string()))
             )?
     )
 }
 
+fn is_private_ip(ip_addr: &std::net::IpAddr) -> bool {
+    match ip_addr {
+        std::net::IpAddr::V4(ip) => ip.is_private(),
+        std::net::IpAddr::V6(ip) => ip.is_unique_local(),
+    }
+}
+
 fn fetch_asn(ip: &str) -> Result<String, Box<dyn Error>> {
+    let ip_addr: std::net::IpAddr = ip.parse()?;
+
+    if ip_addr.is_loopback() || is_private_ip(&ip_addr) {
+        return Ok("Private/Loopback IP".to_string());
+    }
+
     let url = format!("https://ipinfo.io/{}/json", ip);
     let response_text = https::get(&url).map_err(|e| Box::new(MeowpingError(e.to_string())))?;
-
     extract_asn_from_response(&response_text)
 }
 
