@@ -166,29 +166,40 @@ fn print_with_prefix(minimal: bool, message: String) {
 
 fn print_statistics(count: usize, successes: usize, times: &VecDeque<u128>) {
     let failed = count - successes;
-    let min_time =
+
+    let min_time = if successes > 0 {
         (
             *times
                 .iter()
                 .filter(|&&t| t > 0)
                 .min()
                 .unwrap_or(&0) as f32
-        ) / 1000.0;
-    let max_time =
+        ) / 1000.0
+    } else {
+        0.0
+    };
+
+    let max_time = if successes > 0 {
         (
             *times
                 .iter()
                 .filter(|&&t| t > 0)
                 .max()
                 .unwrap_or(&0) as f32
-        ) / 1000.0;
+        ) / 1000.0
+    } else {
+        0.0
+    };
+
     let avg_time = if successes > 0 {
         (
-            (times
+            times
                 .iter()
                 .filter(|&&t| t > 0)
-                .sum::<u128>() / (successes as u128)) as f32
-        ) / 1000.0
+                .sum::<u128>() as f32
+        ) /
+            (successes as f32) /
+            1000.0
     } else {
         0.0
     };

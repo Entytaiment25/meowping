@@ -5,6 +5,7 @@ use std::fmt;
 use std::net::{ SocketAddr, TcpStream, ToSocketAddrs };
 use std::thread::sleep;
 use std::time::{ Duration, Instant };
+use std::collections::VecDeque;
 
 #[derive(Debug)]
 struct MeowpingError(String);
@@ -65,7 +66,7 @@ fn extract_asn_from_response(response_text: &str) -> Result<String, Box<dyn Erro
             return Ok(response_text[start..start + end].trim().to_string());
         }
     }
-    Err(Box::new(MeowpingError("ASN not found in response".to_string())))
+    Ok("Unknown ASN".to_string())
 }
 
 fn print_ip_info(destination: &str, ip: &str, minimal: bool) {
@@ -84,21 +85,13 @@ fn perform_connection(
     count: usize,
     asn: &str,
     minimal: bool
-) -> (usize, f32, f32, f32) {
+) -> (usize, VecDeque<u128>) {
     let mut successes = 0;
-    let mut min_time = f32::MAX;
-    let mut max_time = f32::MIN;
-    let mut total_time = 0.0;
+    let mut times = VecDeque::new();
 
     for _ in 0..count {
         let duration = measure_connection_time(ip_lookup, port, timeout);
-        if duration < min_time {
-            min_time = duration;
-        }
-        if duration > max_time {
-            max_time = duration;
-        }
-        total_time += duration;
+        times.push_back((duration * 1000.0) as u128);
 
         let status_message = format_connection_status(ip_lookup, asn, port, duration, minimal);
         println!("{}", status_message);
@@ -110,8 +103,7 @@ fn perform_connection(
         sleep(Duration::from_secs(1));
     }
 
-    let avg_time = if successes > 0 { total_time / (successes as f32) } else { 0.0 };
-    (successes, min_time, max_time, avg_time)
+    (successes, times)
 }
 
 fn measure_connection_time(ip_lookup: SocketAddr, port: u16, timeout: u64) -> f32 {
@@ -166,18 +158,55 @@ fn format_connection_status(
     }
 }
 
-fn print_statistics(count: usize, successes: usize, min_time: f32, max_time: f32, avg_time: f32) {
+fn print_statistics(count: usize, successes: usize, times: &VecDeque<u128>) {
     let failed = count - successes;
 
-    println!("\nConnection statistics:");
+    let min_time = if successes > 0 {
+        (
+            *times
+                .iter()
+                .filter(|&&t| t > 0)
+                .min()
+                .unwrap_or(&0) as f32
+        ) / 1000.0
+    } else {
+        0.0
+    };
+
+    let max_time = if successes > 0 {
+        (
+            *times
+                .iter()
+                .filter(|&&t| t > 0)
+                .max()
+                .unwrap_or(&0) as f32
+        ) / 1000.0
+    } else {
+        0.0
+    };
+
+    let avg_time = if successes > 0 {
+        (
+            times
+                .iter()
+                .filter(|&&t| t > 0)
+                .sum::<u128>() as f32
+        ) /
+            (successes as f32) /
+            1000.0
+    } else {
+        0.0
+    };
+
+    println!("\nTCP Ping statistics:");
     println!(
-        "\tAttempted = {}, Connected = {}, Failed = {} ({}% loss)",
+        "\tAttempted = {}, Successes = {}, Failures = {} ({}% loss)",
         count.to_string().blue(),
         successes.to_string().blue(),
         failed.to_string().blue(),
         format!("{:.2}%", ((failed as f32) / (count as f32)) * 100.0).blue()
     );
-    println!("Approximate connection times:");
+    println!("Approximate round trip times:");
     println!(
         "\tMinimum = {}, Maximum = {}, Average = {}",
         format!("{:.2}ms", min_time).blue(),
@@ -200,15 +229,8 @@ pub fn perform_tcp(
     }
 
     let asn = fetch_asn(&ip_lookup.ip().to_string())?;
-    let (successes, min_time, max_time, avg_time) = perform_connection(
-        ip_lookup,
-        port,
-        timeout,
-        count,
-        &asn,
-        minimal
-    );
-    print_statistics(count, successes, min_time, max_time, avg_time);
+    let (successes, times) = perform_connection(ip_lookup, port, timeout, count, &asn, minimal);
+    print_statistics(count, successes, &times);
 
     Ok(())
 }
