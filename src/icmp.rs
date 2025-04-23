@@ -115,7 +115,7 @@ fn measure_ping(
     if result.is_ok() {
         Ok(duration)
     } else {
-        Ok(0) // Return 0 for failed pings
+        Ok(0)
     }
 }
 
