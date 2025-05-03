@@ -154,8 +154,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         Ok(None) => {
             let ttl = 64;
             let ident = 0;
-            let payload = b"...meow...meow...meow...";
-            perform_icmp(&destination, timeout, ttl, ident, count, payload, minimal)?;
+            let payload: [u8; 24] = [46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109, 101, 111, 119, 46, 46, 46];
+            perform_icmp(&destination, timeout, ttl, ident, count, &payload, minimal)?;
         }
         Err(_) => {
             return Err("Failed to parse port argument".into());
