@@ -1,10 +1,5 @@
 #include "versions.h"
 
-// #define IDR_MAIN_ICON 100
-// IDR_MAIN_ICON ICON "icon.ico"
-
-// Version
-
 1 VERSIONINFO
  FILEVERSION VERSION_MAJOR,VERSION_MINOR,0,VERSION_PATCH
  PRODUCTVERSION VERSION_MAJOR,VERSION_MINOR,0,VERSION_PATCH
@@ -37,8 +32,3 @@ BEGIN
         VALUE "Translation", 0x409, 1200
     END
 END
-
-// Manifest
-
-//#define RT_MANIFEST 24
-//1 RT_MANIFEST "app.manifest"
