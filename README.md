@@ -51,4 +51,4 @@ sudo ./meowping
 
 ## Preview
 
-![WindowsTerminal_ceZfc3Wia3](https://github.com/Entytaiment25/meowping/assets/64799287/b4365dc0-70de-427b-b6a2-53d919aee4eb)
+![Preview](preview.png)
