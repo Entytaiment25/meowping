@@ -1,6 +1,6 @@
 [package]
 name = "meowping"
-version = "1.8.2"
+version = "1.8.3"
 authors = ["Entytaiment25"]
 edition = "2024"
 rust-version = "1.86.0"
