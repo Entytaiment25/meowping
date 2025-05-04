@@ -13,6 +13,10 @@ keywords = [
     "networking",
     "meowping",
     "command-line-utilities",
+    "icmp",
+    "tcp",
+    "http",
+    "https",
 ]
 categories = ["networking", "ping", "utility", "command-line-utilities"]
 readme = "README.md"
