@@ -75,3 +75,42 @@ impl Colorize for String {
         self.as_str().color(color_code)
     }
 }
+
+use std::fmt::Display;
+use crate::parser::Parser;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HyperLink {
+    text: String,
+    link: String,
+}
+
+impl HyperLink {
+    pub fn new(text: impl AsRef<str>, link: impl AsRef<str>) -> Result<Self, String> {
+        let text = text.as_ref().to_owned();
+        let link = link.as_ref().to_owned();
+
+        // Use the Parser to validate and parse the URL
+        let parsed_url = Parser::parse(&link).map_err(|_| "Invalid URL".to_string())?;
+
+        // Reconstruct the URL from the parsed components
+        let reconstructed_url = format!(
+            "{}://{}{}",
+            parsed_url.scheme,
+            parsed_url.host,
+            parsed_url.path
+        );
+
+        Ok(Self {
+            text,
+            link: reconstructed_url,
+        })
+    }
+}
+
+impl Display for HyperLink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let HyperLink { text, link } = self;
+        write!(f, "\x1b]8;;{link}\x1b\\{text}\x1b]8;;\x1b\\")
+    }
+}

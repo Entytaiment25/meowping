@@ -6,7 +6,7 @@ mod icmp;
 mod tcp;
 mod https;
 mod parser;
-use colors::Colorize;
+use colors::{ Colorize, HyperLink };
 use icmp::perform_icmp;
 use tcp::perform_tcp;
 use parser::{ Extracted, Parser };
@@ -34,12 +34,6 @@ fn check_http_status(url: &str, minimal: bool) -> Result<String, Box<dyn Error>>
             Err(error_msg.into())
         }
     }
-}
-
-fn link<T: Into<String>>(url: T) -> String {
-    let url = url.into();
-
-    format!("\u{1b}]8;;{}\u{1b}\\{}\u{1b}]8;;\u{1b}\\", url, url)
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -115,15 +109,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     let port = args.opt_value_from_str(["-p", "--port"]);
 
     if !minimal {
+        let hyperlink = HyperLink::new(name, "https://github.com/entytaiment25/meowping").expect(
+            "valid hyperlink"
+        );
+
         let message = format!(
             "
     ／l、
-  （ﾟ､ ｡ ７      welcome to {} ({})!
+  （ﾟ､ ｡ ７      welcome to {}!
     l  ~ヽ       {}
     じしf_,)ノ
 ",
-            name,
-            link("https://github.com/entytaiment25/meowping"),
+            hyperlink,
             version_format
         ).magenta();
 
@@ -154,7 +151,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         Ok(None) => {
             let ttl = 64;
             let ident = 0;
-            let payload: [u8; 24] = [46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109, 101, 111, 119, 46, 46, 46];
+            let payload: [u8; 24] = [
+                46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109,
+                101, 111, 119, 46, 46, 46,
+            ];
             perform_icmp(&destination, timeout, ttl, ident, count, &payload, minimal)?;
         }
         Err(_) => {

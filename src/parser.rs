@@ -1,4 +1,5 @@
 pub struct Parser {
+    pub scheme: String,
     pub host: String,
     pub port: Option<u16>,
     pub path: String,
@@ -7,9 +8,11 @@ pub struct Parser {
 impl Parser {
     pub fn parse(url: &str) -> Result<Self, &'static str> {
         let scheme_end = url.find("://");
-        let url = match scheme_end {
-            Some(end) => &url[end + 3..], // Skip over "://"
-            None => url,
+        let (scheme, url) = match scheme_end {
+            Some(end) => (&url[..end], &url[end + 3..]), // Extract scheme and skip "://"
+            None => {
+                return Err("Missing scheme");
+            }
         };
 
         let host_end = url.find('/').unwrap_or_else(|| url.len());
@@ -30,6 +33,7 @@ impl Parser {
         }
 
         Ok(Parser {
+            scheme: scheme.to_string(),
             host: host.to_string(),
             port,
             path: path.to_string(),
