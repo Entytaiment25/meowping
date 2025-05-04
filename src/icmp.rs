@@ -206,7 +206,7 @@ fn print_statistics(count: usize, successes: usize, times: &VecDeque<u128>) {
 
     println!("\nPing statistics:");
     println!(
-        "\tAttempted = {}, Successes = {}, Failures = {} ({}% loss)",
+        "\tAttempted = {}, Successes = {}, Failures = {} ({} loss)",
         count.to_string().blue(),
         successes.to_string().blue(),
         failed.to_string().blue(),
