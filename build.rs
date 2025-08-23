@@ -39,9 +39,13 @@ mod windows {
     #define VERSION_AUTHOR  \"{auhtor}\"
     #define VERSION_NAME \"{name}\"
     "
-            )
-        ).unwrap();
+            ),
+        )
+        .unwrap();
 
-        Build::new().include(out_dir).compile("resources.rc").unwrap();
+        Build::new()
+            .include(out_dir)
+            .compile("resources.rc")
+            .unwrap();
     }
 }

@@ -1,10 +1,10 @@
+use crate::colors::Colorize;
+use ping::ping;
 use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt;
-use std::net::{ IpAddr, ToSocketAddrs };
-use std::time::{ Duration, Instant };
-use ping::ping;
-use crate::colors::Colorize;
+use std::net::{IpAddr, ToSocketAddrs};
+use std::time::{Duration, Instant};
 
 #[derive(Debug)]
 struct MeowpingError(String);
@@ -24,7 +24,7 @@ pub fn perform_icmp(
     ident: u16,
     count: usize,
     payload: &[u8; 24],
-    minimal: bool
+    minimal: bool,
 ) -> Result<(), Box<dyn Error>> {
     let ip_addr = resolve_ip(destination)?;
     let timeout = Duration::from_secs(timeout_secs);
@@ -37,7 +37,7 @@ pub fn perform_icmp(
         ident,
         count,
         payload,
-        minimal
+        minimal,
     )?;
 
     print_statistics(count, successes, &times);
@@ -52,14 +52,20 @@ fn resolve_ip(destination: &str) -> Result<IpAddr, Box<dyn Error>> {
         let addrs = (destination, 0)
             .to_socket_addrs()
             .map_err(|_| Box::new(MeowpingError("Failed to resolve domain".to_string())))?;
-        Ok(
-            addrs
-                .filter_map(|addr| if addr.is_ipv4() { Some(addr.ip()) } else { None })
-                .next()
-                .ok_or_else(||
-                    Box::new(MeowpingError("No valid IPv4 address found for domain".to_string()))
-                )?
-        )
+        Ok(addrs
+            .filter_map(|addr| {
+                if addr.is_ipv4() {
+                    Some(addr.ip())
+                } else {
+                    None
+                }
+            })
+            .next()
+            .ok_or_else(|| {
+                Box::new(MeowpingError(
+                    "No valid IPv4 address found for domain".to_string(),
+                ))
+            })?)
     }
 }
 
@@ -71,7 +77,7 @@ fn execute_pings(
     ident: u16,
     count: usize,
     payload: &[u8; 24],
-    minimal: bool
+    minimal: bool,
 ) -> Result<(usize, VecDeque<u128>), Box<dyn Error>> {
     let mut times = VecDeque::new();
     let mut successes = 0;
@@ -99,7 +105,7 @@ fn measure_ping(
     ttl: u8,
     ident: u16,
     seq_cnt: usize,
-    payload: &[u8; 24]
+    payload: &[u8; 24],
 ) -> Result<u128, Box<dyn Error>> {
     let start = Instant::now();
     let result = ping(
@@ -108,15 +114,11 @@ fn measure_ping(
         Some(ttl.into()),
         Some(ident),
         Some(seq_cnt as u16),
-        Some(payload)
+        Some(payload),
     );
     let duration = start.elapsed().as_micros();
 
-    if result.is_ok() {
-        Ok(duration)
-    } else {
-        Ok(0)
-    }
+    if result.is_ok() { Ok(duration) } else { Ok(0) }
 }
 
 fn print_ping_result(
@@ -126,7 +128,7 @@ fn print_ping_result(
     ttl: u8,
     ident: u16,
     seq_cnt: usize,
-    minimal: bool
+    minimal: bool,
 ) {
     let duration_ms = format!("{:.2}ms", (duration as f32) / 1000.0);
     let ttl_str = ttl.to_string();
@@ -168,38 +170,19 @@ fn print_statistics(count: usize, successes: usize, times: &VecDeque<u128>) {
     let failed = count - successes;
 
     let min_time = if successes > 0 {
-        (
-            *times
-                .iter()
-                .filter(|&&t| t > 0)
-                .min()
-                .unwrap_or(&0) as f32
-        ) / 1000.0
+        (*times.iter().filter(|&&t| t > 0).min().unwrap_or(&0) as f32) / 1000.0
     } else {
         0.0
     };
 
     let max_time = if successes > 0 {
-        (
-            *times
-                .iter()
-                .filter(|&&t| t > 0)
-                .max()
-                .unwrap_or(&0) as f32
-        ) / 1000.0
+        (*times.iter().filter(|&&t| t > 0).max().unwrap_or(&0) as f32) / 1000.0
     } else {
         0.0
     };
 
     let avg_time = if successes > 0 {
-        (
-            times
-                .iter()
-                .filter(|&&t| t > 0)
-                .sum::<u128>() as f32
-        ) /
-            (successes as f32) /
-            1000.0
+        (times.iter().filter(|&&t| t > 0).sum::<u128>() as f32) / (successes as f32) / 1000.0
     } else {
         0.0
     };

@@ -1,7 +1,7 @@
-use native_tls::TlsConnector;
-use std::io::{ Read, Write };
-use std::net::TcpStream;
 use crate::parser::Parser;
+use native_tls::TlsConnector;
+use std::io::{Read, Write};
+use std::net::TcpStream;
 
 fn build_request(host: &str, path: &str) -> String {
     format!(
@@ -11,13 +11,23 @@ fn build_request(host: &str, path: &str) -> String {
         Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n\
         Accept-Language: en-US,en;q=0.9\r\n\
         Connection: close\r\n\r\n",
-        path,
-        host
+        path, host
     )
 }
 
-fn get_http_status(host: &str, port: u16, path: &str) -> Result<u16, Box<dyn std::error::Error>> {
-    let mut stream = TcpStream::connect((host, port))?;
+use std::net::ToSocketAddrs;
+use std::time::Duration;
+fn get_http_status(
+    host: &str,
+    port: u16,
+    path: &str,
+    timeout: u64,
+) -> Result<u16, Box<dyn std::error::Error>> {
+    let addr = (host, port)
+        .to_socket_addrs()?
+        .next()
+        .ok_or("Invalid address")?;
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(timeout))?;
     let request = build_request(host, path);
     stream.write_all(request.as_bytes())?;
 
@@ -28,7 +38,10 @@ fn get_http_status(host: &str, port: u16, path: &str) -> Result<u16, Box<dyn std
     response.extend_from_slice(&buffer[..bytes_read]);
 
     let response_str = String::from_utf8_lossy(&response);
-    let status_line = response_str.lines().next().ok_or("No response status line")?;
+    let status_line = response_str
+        .lines()
+        .next()
+        .ok_or("No response status line")?;
     let status_code = status_line
         .split_whitespace()
         .nth(1)
@@ -38,8 +51,17 @@ fn get_http_status(host: &str, port: u16, path: &str) -> Result<u16, Box<dyn std
     Ok(status_code)
 }
 
-fn get_https_status(host: &str, port: u16, path: &str) -> Result<u16, Box<dyn std::error::Error>> {
-    let stream = TcpStream::connect((host, port))?;
+fn get_https_status(
+    host: &str,
+    port: u16,
+    path: &str,
+    timeout: u64,
+) -> Result<u16, Box<dyn std::error::Error>> {
+    let addr = (host, port)
+        .to_socket_addrs()?
+        .next()
+        .ok_or("Invalid address")?;
+    let stream = TcpStream::connect_timeout(&addr, Duration::from_millis(timeout))?;
     let connector = TlsConnector::new()?;
     let mut ssl_stream = connector.connect(host, stream)?;
 
@@ -53,7 +75,10 @@ fn get_https_status(host: &str, port: u16, path: &str) -> Result<u16, Box<dyn st
     response.extend_from_slice(&buffer[..bytes_read]);
 
     let response_str = String::from_utf8_lossy(&response);
-    let status_line = response_str.lines().next().ok_or("No response status line")?;
+    let status_line = response_str
+        .lines()
+        .next()
+        .ok_or("No response status line")?;
     let status_code = status_line
         .split_whitespace()
         .nth(1)
@@ -63,7 +88,7 @@ fn get_https_status(host: &str, port: u16, path: &str) -> Result<u16, Box<dyn st
     Ok(status_code)
 }
 
-pub fn get_status(url: &str) -> Result<u16, Box<dyn std::error::Error>> {
+pub fn get_status(url: &str, timeout: u64) -> Result<u16, Box<dyn std::error::Error>> {
     let parsed_url = Parser::parse(url)?;
     let host = &parsed_url.host;
     let path = &parsed_url.path;
@@ -75,21 +100,25 @@ pub fn get_status(url: &str) -> Result<u16, Box<dyn std::error::Error>> {
             );
         }
         let port = parsed_url.port.unwrap_or(443);
-        get_https_status(host, port, path)
+        get_https_status(host, port, path, timeout)
     } else {
         let port = parsed_url.port.unwrap_or(80);
-        get_http_status(host, port, path)
+        get_http_status(host, port, path, timeout)
     }
 }
 
-pub fn get(url: &str) -> Result<String, Box<dyn std::error::Error>> {
+pub fn get(url: &str, timeout: u64) -> Result<String, Box<dyn std::error::Error>> {
     let parsed_url = Parser::parse(url)?;
     let host = &parsed_url.host;
     let path = &parsed_url.path;
 
     if url.starts_with("https://") {
         let port = parsed_url.port.unwrap_or(443);
-        let stream = TcpStream::connect((host.as_str(), port))?;
+        let addr = (host.as_str(), port)
+            .to_socket_addrs()?
+            .next()
+            .ok_or("Invalid address")?;
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_millis(timeout))?;
         let connector = TlsConnector::new()?;
         let mut ssl_stream = connector.connect(host, stream)?;
 
@@ -112,11 +141,18 @@ pub fn get(url: &str) -> Result<String, Box<dyn std::error::Error>> {
         }
 
         let response_str = String::from_utf8_lossy(&response);
-        let body = response_str.split("\r\n\r\n").nth(1).ok_or("No response body")?;
+        let body = response_str
+            .split("\r\n\r\n")
+            .nth(1)
+            .ok_or("No response body")?;
         Ok(body.to_string())
     } else {
         let port = parsed_url.port.unwrap_or(80);
-        let mut stream = TcpStream::connect((host.as_str(), port))?;
+        let addr = (host.as_str(), port)
+            .to_socket_addrs()?
+            .next()
+            .ok_or("Invalid address")?;
+        let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(timeout))?;
 
         let request = build_request(host, path);
         stream.write_all(request.as_bytes())?;
@@ -137,7 +173,10 @@ pub fn get(url: &str) -> Result<String, Box<dyn std::error::Error>> {
         }
 
         let response_str = String::from_utf8_lossy(&response);
-        let body = response_str.split("\r\n\r\n").nth(1).ok_or("No response body")?;
+        let body = response_str
+            .split("\r\n\r\n")
+            .nth(1)
+            .ok_or("No response body")?;
         Ok(body.to_string())
     }
 }

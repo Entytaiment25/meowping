@@ -1,11 +1,11 @@
 use crate::colors::Colorize;
-use crate::https::{ self };
+use crate::https::{self};
+use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt;
-use std::net::{ SocketAddr, TcpStream, ToSocketAddrs };
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::thread::sleep;
-use std::time::{ Duration, Instant };
-use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 
 #[derive(Debug)]
 struct MeowpingError(String);
@@ -23,14 +23,11 @@ fn resolve_ip(destination: &str, port: u16) -> Result<SocketAddr, Box<dyn Error>
         return Ok(SocketAddr::new(ip, port));
     }
     let with_port = format!("{}:{}", destination, port);
-    Ok(
-        with_port
-            .to_socket_addrs()?
-            .next()
-            .ok_or_else(||
-                Box::new(MeowpingError("Unable to find IP address from domain.".to_string()))
-            )?
-    )
+    Ok(with_port.to_socket_addrs()?.next().ok_or_else(|| {
+        Box::new(MeowpingError(
+            "Unable to find IP address from domain.".to_string(),
+        ))
+    })?)
 }
 
 fn is_private_ip(ip_addr: &std::net::IpAddr) -> bool {
@@ -48,7 +45,8 @@ fn fetch_asn(ip: &str) -> Result<String, Box<dyn Error>> {
     }
 
     let url = format!("https://ipinfo.io/{}/json", ip);
-    let response_text = https::get(&url).map_err(|e| Box::new(MeowpingError(e.to_string())))?;
+    let response_text =
+        https::get(&url, 5000).map_err(|e| Box::new(MeowpingError(e.to_string())))?;
     extract_asn_from_response(&response_text)
 }
 
@@ -70,12 +68,19 @@ fn extract_asn_from_response(response_text: &str) -> Result<String, Box<dyn Erro
 }
 
 fn print_ip_info(destination: &str, ip: &str, minimal: bool) {
-    let message = format!("Found IP address of domain {}: {}", destination.green(), ip.green());
-    println!("{}", if minimal {
-        message
-    } else {
-        format!("{} {}", "[MEOWPING]".magenta(), message)
-    });
+    let message = format!(
+        "Found IP address of domain {}: {}",
+        destination.green(),
+        ip.green()
+    );
+    println!(
+        "{}",
+        if minimal {
+            message
+        } else {
+            format!("{} {}", "[MEOWPING]".magenta(), message)
+        }
+    );
 }
 
 fn perform_connection(
@@ -84,7 +89,7 @@ fn perform_connection(
     timeout: u64,
     count: usize,
     asn: &str,
-    minimal: bool
+    minimal: bool,
 ) -> (usize, VecDeque<u128>) {
     let mut successes = 0;
     let mut times = VecDeque::new();
@@ -110,7 +115,7 @@ fn measure_connection_time(ip_lookup: SocketAddr, port: u16, timeout: u64) -> f3
     let start = Instant::now();
     let connect_result = TcpStream::connect_timeout(
         &SocketAddr::new(ip_lookup.ip(), port),
-        Duration::from_millis(timeout)
+        Duration::from_millis(timeout),
     );
     let duration = (start.elapsed().as_micros() as f32) / 1000.0;
 
@@ -126,7 +131,7 @@ fn format_connection_status(
     asn: &str,
     port: u16,
     duration: f32,
-    minimal: bool
+    minimal: bool,
 ) -> String {
     if duration < 0.0 {
         let status_message = format!(
@@ -162,38 +167,19 @@ fn print_statistics(count: usize, successes: usize, times: &VecDeque<u128>) {
     let failed = count - successes;
 
     let min_time = if successes > 0 {
-        (
-            *times
-                .iter()
-                .filter(|&&t| t > 0)
-                .min()
-                .unwrap_or(&0) as f32
-        ) / 1000.0
+        (*times.iter().filter(|&&t| t > 0).min().unwrap_or(&0) as f32) / 1000.0
     } else {
         0.0
     };
 
     let max_time = if successes > 0 {
-        (
-            *times
-                .iter()
-                .filter(|&&t| t > 0)
-                .max()
-                .unwrap_or(&0) as f32
-        ) / 1000.0
+        (*times.iter().filter(|&&t| t > 0).max().unwrap_or(&0) as f32) / 1000.0
     } else {
         0.0
     };
 
     let avg_time = if successes > 0 {
-        (
-            times
-                .iter()
-                .filter(|&&t| t > 0)
-                .sum::<u128>() as f32
-        ) /
-            (successes as f32) /
-            1000.0
+        (times.iter().filter(|&&t| t > 0).sum::<u128>() as f32) / (successes as f32) / 1000.0
     } else {
         0.0
     };
@@ -220,7 +206,7 @@ pub fn perform_tcp(
     port: u16,
     timeout: u64,
     count: usize,
-    minimal: bool
+    minimal: bool,
 ) -> Result<(), Box<dyn Error>> {
     let ip_lookup = resolve_ip(destination, port)?;
 

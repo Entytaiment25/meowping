@@ -1,6 +1,6 @@
 #[cfg(target_os = "windows")]
 pub mod fix_ansicolor {
-    use winapi::um::consoleapi::{ GetConsoleMode, SetConsoleMode };
+    use winapi::um::consoleapi::{GetConsoleMode, SetConsoleMode};
     use winapi::um::processenv::GetStdHandle;
     use winapi::um::winbase::STD_OUTPUT_HANDLE;
     use winapi::um::wincon::ENABLE_VIRTUAL_TERMINAL_PROCESSING;
@@ -76,8 +76,8 @@ impl Colorize for String {
     }
 }
 
-use std::fmt::Display;
 use crate::parser::Parser;
+use std::fmt::Display;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct HyperLink {
@@ -96,9 +96,7 @@ impl HyperLink {
         // Reconstruct the URL from the parsed components
         let reconstructed_url = format!(
             "{}://{}{}",
-            parsed_url.scheme,
-            parsed_url.host,
-            parsed_url.path
+            parsed_url.scheme, parsed_url.host, parsed_url.path
         );
 
         Ok(Self {

@@ -18,7 +18,11 @@ impl Parser {
         let host_end = url.find('/').unwrap_or_else(|| url.len());
 
         let host_port = &url[..host_end];
-        let path = if host_end < url.len() { &url[host_end..] } else { "/" };
+        let path = if host_end < url.len() {
+            &url[host_end..]
+        } else {
+            "/"
+        };
 
         let mut host = host_port;
         let mut port = None;

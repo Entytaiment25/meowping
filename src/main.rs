@@ -1,22 +1,23 @@
 use pico_args::Arguments;
-use std::{ error::Error, net::IpAddr };
+use std::thread::sleep;
+use std::time::Duration;
+use std::{error::Error, net::IpAddr};
 
 mod colors;
-mod icmp;
-mod tcp;
 mod https;
+mod icmp;
 mod parser;
-use colors::{ Colorize, HyperLink };
+mod tcp;
+use colors::{Colorize, HyperLink};
 use icmp::perform_icmp;
+use parser::{Extracted, Parser};
 use tcp::perform_tcp;
-use parser::{ Extracted, Parser };
-use https::get_status;
 
 #[cfg(target_os = "windows")]
 use colors::fix_ansicolor;
 
-fn check_http_status(url: &str, minimal: bool) -> Result<String, Box<dyn Error>> {
-    match get_status(url) {
+fn check_http_status(url: &str, minimal: bool, timeout: u64) -> Result<String, Box<dyn Error>> {
+    match https::get_status(url, timeout) {
         Ok(status) => {
             let message = format!("{} is online. HTTP status: {}", url, status);
             if minimal {
@@ -47,7 +48,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     if args.contains(["-h", "--help"]) {
         println!("Usage: {} <destination> [options]\n", name);
         println!("Optional Options:");
-        println!("{:>30}", "    -h, --help                Prints the Help Menu");
+        println!(
+            "{:>30}",
+            "    -h, --help                Prints the Help Menu"
+        );
         println!(
             "{:>30}",
             "    -p, --port <port>         Set the port number (default: ICMP, with: TCP)"
@@ -60,7 +64,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             "{:>30}",
             "    -c, --count <count>       Set the number of connection attempts (default: 65535)"
         );
-        println!("{:>30}", "    -m, --minimal             Changes the Prints to be more Minimal");
+        println!(
+            "{:>30}",
+            "    -m, --minimal             Changes the Prints to be more Minimal"
+        );
         println!(
             "{:>30}",
             "    -s, --http              Check if the destination URL is online via HTTP/S"
@@ -78,19 +85,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    if http_check {
-        match check_http_status(&destination, minimal) {
-            Ok(status) => {
-                println!("{}", status);
-                return Ok(());
-            }
-            Err(e) => {
-                println!("{}", e);
-                return Ok(());
-            }
-        }
-    }
-
     let timeout = match args.opt_value_from_str(["-t", "--timeout"]) {
         Ok(Some(t)) => t,
         Ok(None) => 1000,
@@ -106,12 +100,33 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
+    if http_check {
+        let mut url = destination.clone();
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            url = format!("http://{}", url);
+        }
+        for i in 0..count {
+            match check_http_status(&url, minimal, timeout) {
+                Ok(status) => {
+                    println!("{}", status);
+                }
+                Err(e) => {
+                    println!("{}", e);
+                }
+            }
+            // Don't sleep after the last iteration
+            if i < count - 1 {
+                sleep(Duration::from_secs(1));
+            }
+        }
+        return Ok(());
+    }
+
     let port = args.opt_value_from_str(["-p", "--port"]);
 
     if !minimal {
-        let hyperlink = HyperLink::new(name, "https://github.com/entytaiment25/meowping").expect(
-            "valid hyperlink"
-        );
+        let hyperlink = HyperLink::new(name, "https://github.com/entytaiment25/meowping")
+            .expect("valid hyperlink");
 
         let message = format!(
             "
@@ -120,9 +135,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     l  ~ヽ       {}
     じしf_,)ノ
 ",
-            hyperlink,
-            version_format
-        ).magenta();
+            hyperlink, version_format
+        )
+        .magenta();
 
         println!("{}", message);
     }
