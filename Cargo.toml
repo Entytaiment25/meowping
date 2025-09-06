@@ -1,9 +1,9 @@
 [package]
 name = "meowping"
-version = "1.8.5"
+version = "1.8.6"
 authors = ["Entytaiment25"]
 edition = "2024"
-rust-version = "1.86.0"
+rust-version = "1.89.0"
 description = "A simple ping utility written in Rust, that is focused on being size efficient and fast."
 repository = "https://github.com/entytaiment25/meowping"
 license = "MIT"
@@ -36,16 +36,21 @@ strip = "symbols"
 
 [dependencies]
 pico-args = { version = "0.5.0", default-features = false }
-ping = { version = "0.6.1", default-features = false }
 native-tls = "0.2.14"
 
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2" }
+
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3.9", default-features = false, features = [
-    "consoleapi",
-    "processenv",
-    "winbase",
-    "wincon",
-] }
+windows-sys = { version = "0.61.0", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+], default-features = false }
+
+[target.'cfg(windows)'.dependencies.winapi]
+version = "0.3.9"
+default-features = false
+features = ["consoleapi", "processenv", "winbase", "wincon"]
 
 [target.'cfg(windows)'.build-dependencies]
 windres = "0.2.2"
