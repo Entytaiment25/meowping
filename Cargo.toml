@@ -1,6 +1,6 @@
 [package]
 name = "meowping"
-version = "1.8.6"
+version = "1.8.7"
 authors = ["Entytaiment25"]
 edition = "2024"
 rust-version = "1.89.0"
@@ -39,7 +39,7 @@ pico-args = { version = "0.5.0", default-features = false }
 native-tls = "0.2.14"
 
 [target.'cfg(unix)'.dependencies]
-libc = { version = "0.2" }
+libc = { version = "0.2.175" }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.0", features = [
