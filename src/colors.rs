@@ -89,11 +89,7 @@ impl HyperLink {
     pub fn new(text: impl AsRef<str>, link: impl AsRef<str>) -> Result<Self, String> {
         let text = text.as_ref().to_owned();
         let link = link.as_ref().to_owned();
-
-        // Use the Parser to validate and parse the URL
         let parsed_url = Parser::parse(&link).map_err(|_| "Invalid URL".to_string())?;
-
-        // Reconstruct the URL from the parsed components
         let reconstructed_url = format!(
             "{}://{}{}",
             parsed_url.scheme, parsed_url.host, parsed_url.path
