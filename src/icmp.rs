@@ -217,7 +217,9 @@ mod platform {
     struct HandleGuard(isize);
     impl Drop for HandleGuard {
         fn drop(&mut self) {
-            unsafe { IcmpCloseHandle(self.0 as *mut std::ffi::c_void); }
+            unsafe {
+                IcmpCloseHandle(self.0 as *mut std::ffi::c_void);
+            }
         }
     }
 
@@ -296,12 +298,11 @@ pub fn perform_icmp(
                 );
                 print_with_prefix(minimal, msg.green());
             }
-            Err(e) => {
+            Err(_e) => {
                 times.push_back(0);
                 let msg = format!(
-                    "Request timeout for icmp_seq {} ({}): time={:.2}ms TTL={} Identifier={}",
+                    "Request timeout for icmp_seq {} time={:.2}ms TTL={} Identifier={}",
                     seq,
-                    e,
                     (elapsed_us as f64) / 1000.0,
                     ttl,
                     ident
