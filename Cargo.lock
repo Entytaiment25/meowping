@@ -119,11 +119,10 @@ checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
 
 [[package]]
 name = "meowping"
-version = "1.8.7"
+version = "1.8.9"
 dependencies = [
  "libc",
  "native-tls",
- "pico-args",
  "winapi",
  "windows-sys 0.61.0",
  "windres",
@@ -195,12 +194,6 @@ dependencies = [
  "pkg-config",
  "vcpkg",
 ]
-
-[[package]]
-name = "pico-args"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5be167a7af36ee22fe3115051bc51f6e6c7054c9348e28deb4f49bd6f705a315"
 
 [[package]]
 name = "pkg-config"

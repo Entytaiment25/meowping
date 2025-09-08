@@ -1,13 +1,15 @@
-use pico_args::Arguments;
 use std::thread::sleep;
 use std::time::Duration;
 use std::{error::Error, net::IpAddr};
 
+mod cli;
 mod colors;
 mod https;
 mod icmp;
 mod parser;
 mod tcp;
+
+use cli::Arguments;
 use colors::{Colorize, HyperLink};
 use icmp::perform_icmp;
 use parser::{Extracted, Parser};
