@@ -9,7 +9,7 @@ impl Parser {
     pub fn parse(url: &str) -> Result<Self, &'static str> {
         let scheme_end = url.find("://");
         let (scheme, url) = match scheme_end {
-            Some(end) => (&url[..end], &url[end + 3..]), // Extract scheme and skip "://"
+            Some(end) => (&url[..end], &url[end + 3..]),
             None => {
                 return Err("Missing scheme");
             }

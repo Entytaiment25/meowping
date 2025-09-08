@@ -354,20 +354,20 @@ fn print_statistics(count: usize, successes: usize, times: &VecDeque<u128>) {
     println!("\nPing statistics:");
     println!(
         "\tAttempted = {}, Successes = {}, Failures = {} ({} loss)",
-        count.to_string().blue(),
-        successes.to_string().blue(),
-        failed.to_string().blue(),
+        count.to_string().bright_blue(),
+        successes.to_string().bright_blue(),
+        failed.to_string().bright_blue(),
         format!(
             "{:.2}%",
             ((failed as f32) / (count as f32).max(1.0)) * 100.0
         )
-        .blue()
+        .bright_blue()
     );
     println!("Approximate round trip times:");
     println!(
         "\tMinimum = {}, Maximum = {}, Average = {}",
-        format!("{:.2}ms", min_time).blue(),
-        format!("{:.2}ms", max_time).blue(),
-        format!("{:.2}ms", avg_time).blue()
+        format!("{:.2}ms", min_time).bright_blue(),
+        format!("{:.2}ms", max_time).bright_blue(),
+        format!("{:.2}ms", avg_time).bright_blue()
     );
 }
