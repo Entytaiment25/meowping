@@ -45,9 +45,29 @@ impl Parser {
     }
 
     pub fn extract_url(input: &str) -> Extracted {
-        match Self::parse(input) {
-            Ok(parsed) => Extracted::Success(parsed.host),
-            Err(_) => Extracted::Error,
+        if input.contains("://") {
+            return match Self::parse(input) {
+                Ok(parsed) => Extracted::Success(parsed.host),
+                Err(_) => Extracted::Error,
+            };
+        }
+
+        let host_end = input.find('/').unwrap_or_else(|| input.len());
+        let host_port = &input[..host_end];
+        if host_port.is_empty() {
+            return Extracted::Error;
+        }
+
+        let host = if let Some(colon_pos) = host_port.find(':') {
+            &host_port[..colon_pos]
+        } else {
+            host_port
+        };
+
+        if host.is_empty() {
+            Extracted::Error
+        } else {
+            Extracted::Success(host.to_string())
         }
     }
 }

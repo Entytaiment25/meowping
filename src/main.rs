@@ -78,7 +78,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let minimal = args.contains(["-m", "--minimal"]);
-    let http_check = args.contains(["-s", "--http"]);
 
     let destination = match args.free_from_str::<String>() {
         Ok(dest) => dest,
@@ -86,6 +85,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             return Err("Destination argument missing".into());
         }
     };
+
+    let http_check = args.contains(["-s", "--http"]);
 
     let timeout = match args.opt_value_from_str(["-t", "--timeout"]) {
         Ok(Some(t)) => t,
@@ -116,7 +117,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                     println!("{}", e);
                 }
             }
-            // Don't sleep after the last iteration
             if i < count - 1 {
                 sleep(Duration::from_secs(1));
             }
@@ -167,7 +167,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Ok(Some(p)) => perform_tcp(&destination, p, timeout, count.into(), minimal)?,
         Ok(None) => {
             let ttl = 64;
-            let ident = 0;
+            let ident: u16 = 0;
             let payload: [u8; 24] = [
                 46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109,
                 101, 111, 119, 46, 46, 46,
