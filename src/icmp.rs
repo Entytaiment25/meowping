@@ -1,8 +1,8 @@
 use crate::colors::Colorize;
 use std::collections::VecDeque;
 use std::error::Error;
-use std::net::{ IpAddr, Ipv4Addr, ToSocketAddrs };
-use std::time::{ Duration, Instant };
+use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs};
+use std::time::{Duration, Instant};
 
 fn resolve_ipv4(host: &str) -> std::io::Result<Ipv4Addr> {
     if let Ok(ip) = host.parse::<Ipv4Addr>() {
@@ -14,7 +14,10 @@ fn resolve_ipv4(host: &str) -> std::io::Result<Ipv4Addr> {
             return Ok(v4);
         }
     }
-    Err(std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "No IPv4 address found for host"))
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AddrNotAvailable,
+        "No IPv4 address found for host",
+    ))
 }
 
 #[cfg(unix)]
@@ -50,7 +53,7 @@ mod platform {
                 libc::SOL_SOCKET,
                 libc::SO_RCVTIMEO,
                 &tv as *const _ as *const libc::c_void,
-                mem::size_of::<libc::timeval>() as libc::socklen_t
+                mem::size_of::<libc::timeval>() as libc::socklen_t,
             )
         };
         if ret == -1 {
@@ -67,7 +70,7 @@ mod platform {
                 libc::IPPROTO_IP,
                 libc::IP_TTL,
                 &ttl_val as *const _ as *const libc::c_void,
-                mem::size_of::<libc::c_int>() as libc::socklen_t
+                mem::size_of::<libc::c_int>() as libc::socklen_t,
             )
         };
         if ret == -1 {
@@ -93,7 +96,7 @@ mod platform {
         timeout: Duration,
         ttl: u8,
         ident: u16,
-        payload: &[u8; 24]
+        payload: &[u8; 24],
     ) -> io::Result<(usize, Duration)> {
         let fd_raw = unsafe { libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_ICMP) };
         if fd_raw < 0 {
@@ -139,7 +142,7 @@ mod platform {
                 packet.len(),
                 0,
                 addr_ptr,
-                addr_len
+                addr_len,
             )
         };
         if sent < 0 {
@@ -157,7 +160,7 @@ mod platform {
                 buf.len(),
                 0,
                 &mut from as *mut _ as *mut libc::sockaddr,
-                &mut from_len as *mut _
+                &mut from_len as *mut _,
             )
         };
         if received < 0 {
@@ -186,7 +189,10 @@ mod platform {
         let r_seq = u16::from_be_bytes([icmp[6], icmp[7]]);
 
         if icmp_type != 0 || icmp_code != 0 || r_id != identifier || r_seq != seq {
-            return Err(io::Error::new(io::ErrorKind::Other, "Unexpected ICMP reply"));
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Unexpected ICMP reply",
+            ));
         }
 
         let bytes = n - off;
@@ -201,10 +207,7 @@ mod platform {
     use std::mem;
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
     use windows_sys::Win32::NetworkManagement::IpHelper::{
-        ICMP_ECHO_REPLY,
-        IcmpCloseHandle,
-        IcmpCreateFile,
-        IcmpSendEcho,
+        ICMP_ECHO_REPLY, IcmpCloseHandle, IcmpCreateFile, IcmpSendEcho,
     };
 
     struct HandleGuard(isize);
@@ -222,7 +225,7 @@ mod platform {
         timeout: Duration,
         _ttl: u8,
         _ident: u16,
-        payload: &[u8; 24]
+        payload: &[u8; 24],
     ) -> io::Result<(usize, Duration)> {
         unsafe {
             let handle = IcmpCreateFile();
@@ -242,7 +245,7 @@ mod platform {
                 std::ptr::null(),
                 reply_buf.as_mut_ptr() as _,
                 reply_buf.len() as u32,
-                timeout.as_millis() as u32
+                timeout.as_millis() as u32,
             );
             let rtt = start.elapsed();
 
@@ -263,7 +266,7 @@ pub fn perform_icmp(
     ident: u16,
     count: usize,
     payload: &[u8; 24],
-    minimal: bool
+    minimal: bool,
 ) -> Result<(), Box<dyn Error>> {
     let ip = resolve_ipv4(destination)?;
     let timeout = Duration::from_millis(timeout_ms);
@@ -293,8 +296,7 @@ pub fn perform_icmp(
             }
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::PermissionDenied {
-                    let msg =
-                        "ICMP requires admin privileges (raw sockets). Run with sudo or use TCP with -p <port>.";
+                    let msg = "ICMP requires admin privileges (raw sockets). Run with sudo or use TCP with -p <port>.";
                     print_with_prefix(minimal, msg.red());
                     break;
                 }
@@ -331,11 +333,7 @@ fn print_with_prefix(minimal: bool, message: String) {
 fn print_statistics(count: usize, successes: usize, times: &VecDeque<u128>) {
     let failed = count - successes;
 
-    let good_times: Vec<u128> = times
-        .iter()
-        .copied()
-        .filter(|&t| t > 0)
-        .collect();
+    let good_times: Vec<u128> = times.iter().copied().filter(|&t| t > 0).collect();
 
     let min_time = if !good_times.is_empty() {
         (*good_times.iter().min().unwrap() as f32) / 1000.0
@@ -361,7 +359,11 @@ fn print_statistics(count: usize, successes: usize, times: &VecDeque<u128>) {
         count.to_string().bright_blue(),
         successes.to_string().bright_blue(),
         failed.to_string().bright_blue(),
-        format!("{:.2}%", ((failed as f32) / (count as f32).max(1.0)) * 100.0).bright_blue()
+        format!(
+            "{:.2}%",
+            ((failed as f32) / (count as f32).max(1.0)) * 100.0
+        )
+        .bright_blue()
     );
     println!("Approximate round trip times:");
     println!(
