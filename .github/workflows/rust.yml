@@ -46,3 +46,5 @@ jobs:
         run: cargo build --verbose
       - name: Run tests
         run: cargo test --verbose
+      - name: Run feature tests
+        run: ./ci/feature-tests.sh

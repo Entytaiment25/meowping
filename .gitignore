@@ -5,4 +5,5 @@ rls/
 *.o
 .vscode/
 .DS_Store
+.idea
 docs/
