@@ -15,16 +15,22 @@ if [ ! -x "$BINARY" ]; then
     exit 1
 fi
 
-$BINARY 1.1.1.1 -c 1 -m -p 53 | grep -q "Cloudflare"
-
-# Check if the output contains "Cloudflare"
+OUTPUT1=$($BINARY 1.1.1.1 -c 1 -m -p 53)
+echo "$OUTPUT1" | grep -q "Cloudflare"
 if [ $? -ne 0 ]; then
     echo "Test failed: Expected output to contain 'Cloudflare'"
+    echo "Actual output:"
+    echo "$OUTPUT1"
     exit 1
 fi
 
-$BINARY one.one.one.one.one -c 1 -m -p 53 | grep -q "Cloudflare"
+OUTPUT2=$($BINARY https://cloudflare.com -c 1 -m -p 443)
+echo "$OUTPUT2" | grep -q "AS13335 Cloudflare, Inc"
 if [ $? -ne 0 ]; then
-    echo "Test failed: Expected output to contain 'Cloudflare' for one.one.one.one"
+    echo "Test failed: Expected output to contain 'AS13335 Cloudflare, Inc' for https://cloudflare.com"
+    echo "Actual output:"
+    echo "$OUTPUT2"
     exit 1
 fi
+
+echo "All feature tests passed."
