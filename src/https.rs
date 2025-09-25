@@ -37,18 +37,7 @@ fn get_http_status(
     let bytes_read = stream.read(&mut buffer)?;
     response.extend_from_slice(&buffer[..bytes_read]);
 
-    let response_str = String::from_utf8_lossy(&response);
-    let status_line = response_str
-        .lines()
-        .next()
-        .ok_or("No response status line")?;
-    let status_code = status_line
-        .split_whitespace()
-        .nth(1)
-        .ok_or("Failed to parse status code")?
-        .parse::<u16>()?;
-
-    Ok(status_code)
+    parse_http_status(response.as_slice())
 }
 
 fn get_https_status(
@@ -74,11 +63,17 @@ fn get_https_status(
     let bytes_read = ssl_stream.read(&mut buffer)?;
     response.extend_from_slice(&buffer[..bytes_read]);
 
-    let response_str = String::from_utf8_lossy(&response);
-    let status_line = response_str
-        .lines()
+    parse_http_status(response.as_slice())
+}
+
+fn parse_http_status(response: &[u8]) -> Result<u16, Box<dyn std::error::Error>> {
+    let status_line = response
+        .split(|ch| *ch == b'\n')
         .next()
         .ok_or("No response status line")?;
+    let status_line = status_line.strip_suffix(b"\r").unwrap_or(status_line);
+    let status_line = str::from_utf8(status_line).map_err(|_| "Failed to parse status code")?;
+
     let status_code = status_line
         .split_whitespace()
         .nth(1)
@@ -125,27 +120,7 @@ pub fn get(url: &str, timeout: u64) -> Result<String, Box<dyn std::error::Error>
         let request = build_request(host, path);
         ssl_stream.write_all(request.as_bytes())?;
 
-        let mut response = Vec::new();
-        let mut buffer = [0; 4096];
-
-        loop {
-            match ssl_stream.read(&mut buffer) {
-                Ok(0) => {
-                    break;
-                }
-                Ok(n) => response.extend_from_slice(&buffer[..n]),
-                Err(e) => {
-                    return Err(e.into());
-                }
-            }
-        }
-
-        let response_str = String::from_utf8_lossy(&response);
-        let body = response_str
-            .split("\r\n\r\n")
-            .nth(1)
-            .ok_or("No response body")?;
-        Ok(body.to_string())
+        parse_http_body_from_stream(ssl_stream)
     } else {
         let port = parsed_url.port.unwrap_or(80);
         let addr = (host.as_str(), port)
@@ -157,26 +132,23 @@ pub fn get(url: &str, timeout: u64) -> Result<String, Box<dyn std::error::Error>
         let request = build_request(host, path);
         stream.write_all(request.as_bytes())?;
 
-        let mut response = Vec::new();
-        let mut buffer = [0; 4096];
-
-        loop {
-            match stream.read(&mut buffer) {
-                Ok(0) => {
-                    break;
-                }
-                Ok(n) => response.extend_from_slice(&buffer[..n]),
-                Err(e) => {
-                    return Err(e.into());
-                }
-            }
-        }
-
-        let response_str = String::from_utf8_lossy(&response);
-        let body = response_str
-            .split("\r\n\r\n")
-            .nth(1)
-            .ok_or("No response body")?;
-        Ok(body.to_string())
+        parse_http_body_from_stream(stream)
     }
+}
+
+fn parse_http_body_from_stream(
+    mut stream: impl Read,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response)?;
+
+    parse_http_body(&response)
+}
+
+fn parse_http_body(response: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
+    let body_idx = response
+        .windows(4)
+        .position(|double_newline| double_newline == b"\r\n\r\n")
+        .ok_or("No response body")?;
+    Ok(String::from_utf8_lossy(&response[body_idx + 4..]).into_owned())
 }
