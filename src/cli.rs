@@ -11,16 +11,19 @@ impl Arguments {
         Self { args }
     }
 
-    pub fn contains<I>(&self, names: I) -> bool
+    pub fn contains<'a, I>(&self, names: I) -> bool
     where
-        I: IntoIterator<Item = &'static str>,
+        I: IntoIterator<Item = &'a str>,
     {
-        let names: Vec<&str> = names.into_iter().collect();
-        self.args.iter().any(|arg| {
-            names
-                .iter()
-                .any(|&name| arg == name || arg.starts_with(&(name.to_string() + "=")))
-        })
+        names
+            .into_iter()
+            .flat_map(|expected_arg| {
+                self.args
+                    .iter()
+                    .map(move |found_arg| (expected_arg, found_arg.as_str()))
+            })
+            .filter_map(|(expected_arg, found_arg)| found_arg.strip_prefix(expected_arg))
+            .any(|leftover| leftover.is_empty() || leftover.starts_with('='))
     }
 
     pub fn free_from_str<T>(&mut self) -> Result<T, String>
