@@ -29,41 +29,41 @@ impl Arguments {
     pub fn free_from_str<T>(&mut self) -> Result<T, String>
     where
         T: FromStr,
-        T::Err: ToString,
+        T::Err: std::fmt::Display,
     {
-        if let Some((idx, _)) = self
+        let idx = self
             .args
             .iter()
-            .enumerate()
-            .find(|(_, a)| !a.starts_with('-'))
-        {
-            let val = self.args.remove(idx);
-            val.parse::<T>()
-                .map_err(|e| format!("Failed to parse positional argument: {}", e.to_string()))
-        } else {
-            Err("Missing positional argument".into())
-        }
+            .position(|a| !a.starts_with('-'))
+            .ok_or_else(|| "Missing positional argument".to_string())?;
+
+        let val = self.args.remove(idx);
+        val.parse::<T>()
+            .map_err(|e| format!("Failed to parse positional argument: {e}"))
     }
 
     pub fn opt_value_from_str<T, const N: usize>(
         &mut self,
-        names: [&'static str; N],
+        names: [&str; N],
     ) -> Result<Option<T>, String>
     where
         T: FromStr,
-        T::Err: ToString,
+        T::Err: std::fmt::Display,
     {
         for (i, arg) in self.args.iter().enumerate() {
-            for &name in &names {
-                let prefix = format!("{}=", name);
-                if arg.starts_with(&prefix) {
-                    let value_str = &arg[prefix.len()..];
-                    let value = value_str.parse::<T>().map_err(|e| {
-                        format!("Failed to parse value for {}: {}", name, e.to_string())
-                    })?;
-                    self.args.remove(i);
-                    return Ok(Some(value));
-                }
+            for name in names {
+                let Some(value_with_eq) = arg.strip_prefix(name) else {
+                    continue;
+                };
+                let Some(value_str) = value_with_eq.strip_prefix('=') else {
+                    continue;
+                };
+
+                let value = value_str
+                    .parse::<T>()
+                    .map_err(|e| format!("Failed to parse value for {e}: {}", name))?;
+                self.args.remove(i);
+                return Ok(Some(value));
             }
         }
 
@@ -76,13 +76,9 @@ impl Arguments {
                 }
                 let value_str = self.args.remove(i + 1);
                 let name_taken = self.args.remove(i);
-                let value = value_str.parse::<T>().map_err(|e| {
-                    format!(
-                        "Failed to parse value for {}: {}",
-                        name_taken,
-                        e.to_string()
-                    )
-                })?;
+                let value = value_str
+                    .parse::<T>()
+                    .map_err(|e| format!("Failed to parse value for {name_taken}: {e}"))?;
                 return Ok(Some(value));
             } else {
                 i += 1;
