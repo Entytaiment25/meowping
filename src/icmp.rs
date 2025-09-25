@@ -98,7 +98,14 @@ mod platform {
         ident: u16,
         payload: &[u8; 24],
     ) -> io::Result<(usize, Duration)> {
-        let fd_raw = unsafe { libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_ICMP) };
+        let is_linux = cfg!(target_os = "linux");
+        let sock_ty = if is_linux {
+            // allows rootless on Linux
+            libc::SOCK_DGRAM
+        } else {
+            libc::SOCK_RAW
+        };
+        let fd_raw = unsafe { libc::socket(libc::AF_INET, sock_ty, libc::IPPROTO_ICMP) };
         if fd_raw < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -121,9 +128,11 @@ mod platform {
         packet[7] = (seq & 0xff) as u8;
         packet[8..8 + payload.len()].copy_from_slice(payload);
 
-        let csum = icmp_checksum(&packet);
-        packet[2] = (csum >> 8) as u8;
-        packet[3] = (csum & 0xff) as u8;
+        if !is_linux {
+            let csum = icmp_checksum(&packet);
+            packet[2] = (csum >> 8) as u8;
+            packet[3] = (csum & 0xff) as u8;
+        }
 
         // Destination sockaddr_in
         let mut addr: libc::sockaddr_in = unsafe { mem::zeroed() };
@@ -192,7 +201,7 @@ mod platform {
         let r_id = u16::from_be_bytes([icmp[4], icmp[5]]);
         let r_seq = u16::from_be_bytes([icmp[6], icmp[7]]);
 
-        if icmp_type != 0 || icmp_code != 0 || r_id != identifier || r_seq != seq {
+        if icmp_type != 0 || icmp_code != 0 || !is_linux && (r_id != identifier || r_seq != seq) {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
                 "Unexpected ICMP reply",
