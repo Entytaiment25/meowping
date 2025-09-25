@@ -43,7 +43,7 @@ jobs:
         run: |
           echo "OPENSSL_DIR=C:\Program Files\OpenSSL" >> $GITHUB_ENV
       - name: Build
-        run: cargo build --verbose
+        run: cargo install --verbose --path .
       - name: Run tests
         run: cargo test --verbose
       - name: Run feature tests
