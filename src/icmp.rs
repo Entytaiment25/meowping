@@ -130,7 +130,7 @@ mod platform {
         addr.sin_family = libc::AF_INET as libc::sa_family_t;
         addr.sin_port = 0;
         addr.sin_addr = libc::in_addr {
-            s_addr: u32::from_be_bytes(ip.octets()),
+            s_addr: u32::from_be_bytes(ip.octets()).to_be(),
         };
 
         let addr_ptr = &addr as *const libc::sockaddr_in as *const libc::sockaddr;
@@ -243,7 +243,7 @@ mod platform {
             let start = Instant::now();
             let num = IcmpSendEcho(
                 handle.0 as *mut std::ffi::c_void,
-                u32::from_be_bytes(ip.octets()),
+                u32::from_be_bytes(ip.octets()).to_be(),
                 payload.as_ptr() as _,
                 payload.len() as u16,
                 std::ptr::null(),
