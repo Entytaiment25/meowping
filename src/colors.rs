@@ -58,8 +58,7 @@ pub struct HyperLink {
 impl HyperLink {
     pub fn new(text: impl AsRef<str>, link: impl AsRef<str>) -> Result<Self, String> {
         let text = text.as_ref().to_owned();
-        let link = link.as_ref().to_owned();
-        let parsed_url = Parser::parse(&link).map_err(|_| "Invalid URL".to_string())?;
+        let parsed_url = Parser::parse(link.as_ref()).map_err(|_| "Invalid URL".to_string())?;
         let reconstructed_url = format!(
             "{}://{}{}",
             parsed_url.scheme, parsed_url.host, parsed_url.path
