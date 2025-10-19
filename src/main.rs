@@ -74,11 +74,16 @@ fn main() -> Result<(), Box<dyn Error>> {
             "{:>30}",
             "    -s, --http              Check if the destination URL is online via HTTP/S"
         );
+        println!(
+            "{:>30}",
+            "    -a, --no-asn            Disable ASN/organization lookups (use static data)"
+        );
         return Ok(());
     }
 
     let minimal = args.contains(["-m", "--minimal"]);
     let http_check = args.contains(["-s", "--http"]);
+    let no_asn = args.contains(["-a", "--no-asn"]);
 
     let destination = match args.free_from_str::<String>() {
         Ok(dest) => dest,
@@ -164,7 +169,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     match port {
-        Ok(Some(p)) => perform_tcp(&destination, p, timeout, count.into(), minimal)?,
+        Ok(Some(p)) => perform_tcp(&destination, p, timeout, count.into(), minimal, no_asn)?,
         Ok(None) => {
             let ttl = 64;
             let ident = 0;

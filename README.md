@@ -11,6 +11,10 @@ MeowPing is a command-line utility for testing network connectivity using ICMP e
 - Display of connection statistics including success rate, minimum, maximum, and average connection times.
 - Works with IPv4, IPv6 and Domains.
 
+## Third-Party Services
+
+**Disclaimer:** For TCP connections, MeowPing retrieves ASN/organization data from https://ipinfo.io. Use `-a`/`--no-asn` to disable these API calls and use static data instead.
+
 ## Usage
 
 MeowPing offers a simple command-line interface with various options:
@@ -28,12 +32,18 @@ OPTIONS:
     -t, --timeout <ms>      Set the timeout for each connection attempt in milliseconds (default: 1000ms)
     -c, --count <count>     Set the number of connection attempts (default: 65535)
     -m, --minimal           Changes the Prints to be more Minimal
+    -a, --no-asn            Disable ASN/organization lookups (use static data)
 ```
 
 ### Example Usage
 
 ```powershell
 ./meowping 8.8.8.8 -p 53
+```
+
+**Disable ASN lookups for privacy:**
+```powershell
+./meowping 8.8.8.8 -p 53 -a
 ```
 
 **For Linux users to get ICMP working.**

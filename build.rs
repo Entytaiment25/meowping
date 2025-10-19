@@ -17,8 +17,6 @@ mod windows {
     pub fn compile_resources_file() {
         let out_dir = env::var_os("OUT_DIR").unwrap();
         let resource_header = Path::new(&out_dir).join("versions.h");
-
-        // Write include file for resource parameters based on cargo settings
         let major = env!("CARGO_PKG_VERSION_MAJOR");
         let minor = env!("CARGO_PKG_VERSION_MINOR");
         let patch = env!("CARGO_PKG_VERSION_PATCH");

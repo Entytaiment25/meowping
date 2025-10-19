@@ -37,11 +37,15 @@ fn is_private_ip(ip_addr: &std::net::IpAddr) -> bool {
     }
 }
 
-fn fetch_asn(ip: &str) -> Result<String, Box<dyn Error>> {
+fn fetch_asn(ip: &str, no_api: bool) -> Result<String, Box<dyn Error>> {
     let ip_addr: std::net::IpAddr = ip.parse()?;
 
     if ip_addr.is_loopback() || is_private_ip(&ip_addr) {
         return Ok("Private/Loopback IP".to_string());
+    }
+
+    if no_api {
+        return Ok("no lookup".to_string());
     }
 
     let url = format!("https://ipinfo.io/{}/json", ip);
@@ -207,6 +211,7 @@ pub fn perform_tcp(
     timeout: u64,
     count: usize,
     minimal: bool,
+    no_asn: bool,
 ) -> Result<(), Box<dyn Error>> {
     let ip_lookup = resolve_ip(destination, port)?;
 
@@ -214,7 +219,7 @@ pub fn perform_tcp(
         print_ip_info(destination, &ip_lookup.ip().to_string(), minimal);
     }
 
-    let asn = fetch_asn(&ip_lookup.ip().to_string())?;
+    let asn = fetch_asn(&ip_lookup.ip().to_string(), no_asn)?;
     let (successes, times) = perform_connection(ip_lookup, port, timeout, count, &asn, minimal);
     print_statistics(count, successes, &times);
 
