@@ -121,7 +121,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                     println!("{}", e);
                 }
             }
-            // Don't sleep after the last iteration
             if i < count - 1 {
                 sleep(Duration::from_secs(1));
             }

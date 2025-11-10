@@ -137,28 +137,49 @@ fn format_connection_status(
     duration: f32,
     minimal: bool,
 ) -> String {
+    let show_asn = !minimal || asn != "no lookup";
+
     if duration < 0.0 {
-        let status_message = format!(
-            "{} timed out ({}): protocol={} port={}",
-            ip_lookup.ip().to_string().red(),
-            asn.red(),
-            "TCP".red(),
-            port.to_string().red()
-        );
+        let status_message = if show_asn {
+            format!(
+                "{} timed out ({}): protocol={} port={}",
+                ip_lookup.ip().to_string().red(),
+                asn.red(),
+                "TCP".red(),
+                port.to_string().red()
+            )
+        } else {
+            format!(
+                "{} timed out: protocol={} port={}",
+                ip_lookup.ip().to_string().red(),
+                "TCP".red(),
+                port.to_string().red()
+            )
+        };
         if minimal {
             status_message
         } else {
             format!("{} {}", "[MEOWPING]".magenta(), status_message)
         }
     } else {
-        let status_message = format!(
-            "{} ({}): {} protocol={} port={}",
-            ip_lookup.ip().to_string().green(),
-            asn.green(),
-            format!("{:.2}ms", duration).green(),
-            "TCP".green(),
-            port.to_string().green()
-        );
+        let status_message = if show_asn {
+            format!(
+                "{} ({}): {} protocol={} port={}",
+                ip_lookup.ip().to_string().green(),
+                asn.green(),
+                format!("{:.2}ms", duration).green(),
+                "TCP".green(),
+                port.to_string().green()
+            )
+        } else {
+            format!(
+                "{}: {} protocol={} port={}",
+                ip_lookup.ip().to_string().green(),
+                format!("{:.2}ms", duration).green(),
+                "TCP".green(),
+                port.to_string().green()
+            )
+        };
         if minimal {
             status_message
         } else {
