@@ -27,4 +27,20 @@ if ! echo "$OUTPUT3" | grep -q "Reply from"; then
     exit 1
 fi
 
+OUTPUT4=$(meowping -s https://mock.httpstatus.io/200 -c 1 -m)
+if ! echo "$OUTPUT4" | grep -q "is online"; then
+    echo "Test failed: Expected output to contain 'is online' for HTTP 200"
+    echo "Actual output:"
+    echo "$OUTPUT4"
+    exit 1
+fi
+
+OUTPUT5=$(meowping -s https://mock.httpstatus.io/503 -c 1 -m)
+if ! echo "$OUTPUT5" | grep -q "is offline (server error)"; then
+    echo "Test failed: Expected output to contain 'is offline (server error)' for HTTP 503"
+    echo "Actual output:"
+    echo "$OUTPUT5"
+    exit 1
+fi
+
 echo "All feature tests passed."
