@@ -21,18 +21,39 @@ use colors::fix_ansicolor;
 fn check_http_status(url: &str, minimal: bool, timeout: u64) -> Result<String, Box<dyn Error>> {
     match https::get_status(url, timeout) {
         Ok(status) => {
-            let message = format!("{} is online. HTTP status: {}", url, status);
-            if minimal {
-                Ok(message)
+            let (status_text, is_online) = match status {
+                200..=399 => ("online", true),
+                400..=499 => ("online (client error)", true),
+                500..=599 => ("offline (server error)", false),
+                _ => ("unknown status", true),
+            };
+            
+            let message = format!("{} is {}. HTTP status: {}", url, status_text, status);
+            let formatted = if minimal {
+                message.clone()
             } else {
-                Ok(format!("{} {}", "[MEOWPING]".magenta(), message))
+                format!("{} {}", "[MEOWPING]".magenta(), message)
+            };
+            
+            if is_online {
+                Ok(formatted)
+            } else {
+                Err(formatted.into())
             }
         }
         Err(e) => {
+            let error_str = e.to_string();
+            let simplified_error = match error_str.as_str() {
+                s if s.contains("address information") || s.contains("nodename nor servname") => "Failed to resolve host",
+                s if s.contains("timed out") || s.contains("timeout") => "Connection timed out",
+                s if s.contains("refused") => "Connection refused",
+                _ => &error_str,
+            };
+            
             let error_msg = if minimal {
-                e.to_string()
+                simplified_error.to_string()
             } else {
-                format!("{} {}", "[MEOWPING]".magenta(), e)
+                format!("{} {}", "[MEOWPING]".magenta(), simplified_error)
             };
             Err(error_msg.into())
         }
