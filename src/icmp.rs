@@ -296,16 +296,22 @@ pub fn perform_icmp(
             Ok((bytes, rtt)) => {
                 successes += 1;
                 times.push_back(rtt.as_micros());
+                let time_ms = rtt.as_secs_f64() * 1000.0;
                 let msg = format!(
                     "Reply from {}: bytes={} icmp_seq={} time={:.2}ms TTL={} Identifier={}",
                     ip,
                     bytes,
                     seq,
-                    rtt.as_secs_f64() * 1000.0,
+                    time_ms,
                     ttl,
                     ident
                 );
-                print_with_prefix(minimal, msg.green());
+                let colored_msg = match time_ms {
+                    t if t >= 250.0 => msg.orange(),
+                    t if t >= 100.0 => msg.yellow(),
+                    _ => msg.green(),
+                };
+                print_with_prefix(minimal, colored_msg);
             }
             Err(_e) => {
                 times.push_back(0);

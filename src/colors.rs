@@ -35,6 +35,12 @@ pub trait Colorize {
     fn bright_blue(&self) -> String {
         self.color("\x1b[94m")
     }
+    fn yellow(&self) -> String {
+        self.color("\x1b[33m")
+    }
+    fn orange(&self) -> String {
+        self.color("\x1b[38;5;208m")
+    }
     fn magenta(&self) -> String {
         self.color("\x1b[35m")
     }

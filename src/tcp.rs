@@ -163,19 +163,29 @@ fn format_connection_status(
         }
     } else {
         let status_message = if show_asn {
+            let time_colored = match duration {
+                d if d >= 250.0 => format!("{:.2}ms", duration).orange(),
+                d if d >= 100.0 => format!("{:.2}ms", duration).yellow(),
+                _ => format!("{:.2}ms", duration).green(),
+            };
             format!(
                 "{} ({}): {} protocol={} port={}",
                 ip_lookup.ip().to_string().green(),
                 asn.green(),
-                format!("{:.2}ms", duration).green(),
+                time_colored,
                 "TCP".green(),
                 port.to_string().green()
             )
         } else {
+            let time_colored = match duration {
+                d if d >= 250.0 => format!("{:.2}ms", duration).orange(),
+                d if d >= 100.0 => format!("{:.2}ms", duration).yellow(),
+                _ => format!("{:.2}ms", duration).green(),
+            };
             format!(
                 "{}: {} protocol={} port={}",
                 ip_lookup.ip().to_string().green(),
-                format!("{:.2}ms", duration).green(),
+                time_colored,
                 "TCP".green(),
                 port.to_string().green()
             )
