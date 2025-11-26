@@ -1,4 +1,5 @@
 use crate::colors::Colorize;
+use crate::output::{color_time, print_statistics, print_with_prefix};
 use std::collections::VecDeque;
 use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs};
@@ -100,7 +101,6 @@ mod platform {
     ) -> io::Result<(usize, Duration)> {
         let is_linux = cfg!(target_os = "linux");
         let sock_ty = if is_linux {
-            // allows rootless on Linux
             libc::SOCK_DGRAM
         } else {
             libc::SOCK_RAW
@@ -114,7 +114,6 @@ mod platform {
         set_recv_timeout(fd.fd, timeout)?;
         let _ = set_ttl(fd.fd, ttl);
 
-        // Build ICMP Echo Request: type(8), code(0), checksum, identifier, sequence, payload
         let identifier = ident;
 
         let mut packet = vec![0u8; 8 + payload.len()];
@@ -134,7 +133,6 @@ mod platform {
             packet[3] = (csum & 0xff) as u8;
         }
 
-        // Destination sockaddr_in
         let mut addr: libc::sockaddr_in = unsafe { mem::zeroed() };
         addr.sin_family = libc::AF_INET as libc::sa_family_t;
         addr.sin_port = 0;
@@ -160,7 +158,6 @@ mod platform {
             return Err(io::Error::last_os_error());
         }
 
-        // Receive reply
         let mut buf = vec![0u8; 1500];
         let mut from: libc::sockaddr_in = unsafe { mem::zeroed() };
         let mut from_len = mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
@@ -183,7 +180,6 @@ mod platform {
         let n = received as usize;
         let view = &buf[..n];
 
-        // Linux: IP header + ICMP. macOS/BSD: ICMP only.
         let mut off = 0usize;
         if !view.is_empty() && (view[0] >> 4) == 4 {
             let ihl = ((view[0] & 0x0f) as usize) * 4;
@@ -297,21 +293,17 @@ pub fn perform_icmp(
                 successes += 1;
                 times.push_back(rtt.as_micros());
                 let time_ms = rtt.as_secs_f64() * 1000.0;
+                let time_str = color_time(time_ms);
                 let msg = format!(
-                    "Reply from {}: bytes={} icmp_seq={} time={:.2}ms TTL={} Identifier={}",
-                    ip,
+                    "Reply from {}: bytes={} icmp_seq={} time={} TTL={} Identifier={}",
+                    ip.to_string().green(),
                     bytes,
                     seq,
-                    time_ms,
+                    time_str,
                     ttl,
                     ident
                 );
-                let colored_msg = match time_ms {
-                    t if t >= 250.0 => msg.orange(),
-                    t if t >= 100.0 => msg.yellow(),
-                    _ => msg.green(),
-                };
-                print_with_prefix(minimal, colored_msg);
+                print_with_prefix(minimal, msg);
             }
             Err(_e) => {
                 times.push_back(0);
@@ -331,58 +323,6 @@ pub fn perform_icmp(
         }
     }
 
-    print_statistics(count, successes, &times);
+    print_statistics("ICMP", count, successes, &times);
     Ok(())
-}
-
-fn print_with_prefix(minimal: bool, message: String) {
-    if minimal {
-        println!("{}", message);
-    } else {
-        println!("{} {}", "[MEOWPING]".magenta(), message);
-    }
-}
-
-fn print_statistics(count: usize, successes: usize, times: &VecDeque<u128>) {
-    let failed = count - successes;
-
-    let good_times: Vec<u128> = times.iter().copied().filter(|&t| t > 0).collect();
-
-    let min_time = if !good_times.is_empty() {
-        (*good_times.iter().min().unwrap() as f32) / 1000.0
-    } else {
-        0.0
-    };
-
-    let max_time = if !good_times.is_empty() {
-        (*good_times.iter().max().unwrap() as f32) / 1000.0
-    } else {
-        0.0
-    };
-
-    let avg_time = if !good_times.is_empty() {
-        (good_times.iter().sum::<u128>() as f32) / (good_times.len() as f32) / 1000.0
-    } else {
-        0.0
-    };
-
-    println!("\nPing statistics:");
-    println!(
-        "\tAttempted = {}, Successes = {}, Failures = {} ({} loss)",
-        count.to_string().bright_blue(),
-        successes.to_string().bright_blue(),
-        failed.to_string().bright_blue(),
-        format!(
-            "{:.2}%",
-            ((failed as f32) / (count as f32).max(1.0)) * 100.0
-        )
-        .bright_blue()
-    );
-    println!("Approximate round trip times:");
-    println!(
-        "\tMinimum = {}, Maximum = {}, Average = {}",
-        format!("{:.2}ms", min_time).bright_blue(),
-        format!("{:.2}ms", max_time).bright_blue(),
-        format!("{:.2}ms", avg_time).bright_blue()
-    );
 }

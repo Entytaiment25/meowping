@@ -45,10 +45,23 @@ impl Parser {
     }
 
     pub fn extract_url(input: &str) -> Extracted {
-        match Self::parse(input) {
-            Ok(parsed) => Extracted::Success(parsed.host),
-            Err(_) => Extracted::Error,
+        if let Ok(parsed) = Self::parse(input) {
+            return Extracted::Success(parsed.host);
         }
+
+        if Self::is_resolvable_hostname(input) {
+            return Extracted::Success(input.to_string());
+        }
+
+        Extracted::Error
+    }
+
+    fn is_resolvable_hostname(hostname: &str) -> bool {
+        use std::net::ToSocketAddrs;
+        format!("{}:80", hostname)
+            .to_socket_addrs()
+            .map(|mut addrs| addrs.next().is_some())
+            .unwrap_or(false)
     }
 }
 

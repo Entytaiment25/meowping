@@ -2,6 +2,8 @@ use crate::parser::Parser;
 use native_tls::TlsConnector;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::net::ToSocketAddrs;
+use std::time::Duration;
 
 fn build_request(host: &str, path: &str) -> String {
     format!(
@@ -13,57 +15,6 @@ fn build_request(host: &str, path: &str) -> String {
         Connection: close\r\n\r\n",
         path, host
     )
-}
-
-use std::net::ToSocketAddrs;
-use std::time::Duration;
-fn get_http_status(
-    host: &str,
-    port: u16,
-    path: &str,
-    timeout: u64,
-) -> Result<u16, Box<dyn std::error::Error>> {
-    let addr = (host, port)
-        .to_socket_addrs()?
-        .next()
-        .ok_or("Invalid address")?;
-    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(timeout))?;
-    let request = build_request(host, path);
-    stream.write_all(request.as_bytes())?;
-
-    let mut response = Vec::new();
-    let mut buffer = [0; 4096];
-
-    let bytes_read = stream.read(&mut buffer)?;
-    response.extend_from_slice(&buffer[..bytes_read]);
-
-    parse_http_status(response.as_slice())
-}
-
-fn get_https_status(
-    host: &str,
-    port: u16,
-    path: &str,
-    timeout: u64,
-) -> Result<u16, Box<dyn std::error::Error>> {
-    let addr = (host, port)
-        .to_socket_addrs()?
-        .next()
-        .ok_or("Invalid address")?;
-    let stream = TcpStream::connect_timeout(&addr, Duration::from_millis(timeout))?;
-    let connector = TlsConnector::new()?;
-    let mut ssl_stream = connector.connect(host, stream)?;
-
-    let request = build_request(host, path);
-    ssl_stream.write_all(request.as_bytes())?;
-
-    let mut response = Vec::new();
-    let mut buffer = [0; 4096];
-
-    let bytes_read = ssl_stream.read(&mut buffer)?;
-    response.extend_from_slice(&buffer[..bytes_read]);
-
-    parse_http_status(response.as_slice())
 }
 
 fn parse_http_status(response: &[u8]) -> Result<u16, Box<dyn std::error::Error>> {
@@ -81,6 +32,64 @@ fn parse_http_status(response: &[u8]) -> Result<u16, Box<dyn std::error::Error>>
         .parse::<u16>()?;
 
     Ok(status_code)
+}
+
+fn parse_http_body(response: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
+    let body_idx = response
+        .windows(4)
+        .position(|double_newline| double_newline == b"\r\n\r\n")
+        .ok_or("No response body")?;
+    Ok(String::from_utf8_lossy(&response[body_idx + 4..]).into_owned())
+}
+
+fn connect_tcp(
+    host: &str,
+    port: u16,
+    timeout: u64,
+) -> Result<TcpStream, Box<dyn std::error::Error>> {
+    let addr = (host, port)
+        .to_socket_addrs()?
+        .next()
+        .ok_or("Invalid address")?;
+    Ok(TcpStream::connect_timeout(
+        &addr,
+        Duration::from_millis(timeout),
+    )?)
+}
+
+fn read_response(mut stream: impl Read) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let mut response = Vec::new();
+    let mut buffer = [0; 4096];
+    let bytes_read = stream.read(&mut buffer)?;
+    response.extend_from_slice(&buffer[..bytes_read]);
+    Ok(response)
+}
+fn get_http_status(
+    host: &str,
+    port: u16,
+    path: &str,
+    timeout: u64,
+) -> Result<u16, Box<dyn std::error::Error>> {
+    let mut stream = connect_tcp(host, port, timeout)?;
+    let request = build_request(host, path);
+    stream.write_all(request.as_bytes())?;
+    let response = read_response(&mut stream)?;
+    parse_http_status(&response)
+}
+
+fn get_https_status(
+    host: &str,
+    port: u16,
+    path: &str,
+    timeout: u64,
+) -> Result<u16, Box<dyn std::error::Error>> {
+    let stream = connect_tcp(host, port, timeout)?;
+    let connector = TlsConnector::new()?;
+    let mut ssl_stream = connector.connect(host, stream)?;
+    let request = build_request(host, path);
+    ssl_stream.write_all(request.as_bytes())?;
+    let response = read_response(&mut ssl_stream)?;
+    parse_http_status(&response)
 }
 
 pub fn get_status(url: &str, timeout: u64) -> Result<u16, Box<dyn std::error::Error>> {
@@ -107,48 +116,25 @@ pub fn get(url: &str, timeout: u64) -> Result<String, Box<dyn std::error::Error>
     let host = &parsed_url.host;
     let path = &parsed_url.path;
 
-    if url.starts_with("https://") {
+    let response = if url.starts_with("https://") {
         let port = parsed_url.port.unwrap_or(443);
-        let addr = (host.as_str(), port)
-            .to_socket_addrs()?
-            .next()
-            .ok_or("Invalid address")?;
-        let stream = TcpStream::connect_timeout(&addr, Duration::from_millis(timeout))?;
+        let stream = connect_tcp(host, port, timeout)?;
         let connector = TlsConnector::new()?;
         let mut ssl_stream = connector.connect(host, stream)?;
-
         let request = build_request(host, path);
         ssl_stream.write_all(request.as_bytes())?;
-
-        parse_http_body_from_stream(ssl_stream)
+        let mut full_response = Vec::new();
+        ssl_stream.read_to_end(&mut full_response)?;
+        full_response
     } else {
         let port = parsed_url.port.unwrap_or(80);
-        let addr = (host.as_str(), port)
-            .to_socket_addrs()?
-            .next()
-            .ok_or("Invalid address")?;
-        let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(timeout))?;
-
+        let mut stream = connect_tcp(host, port, timeout)?;
         let request = build_request(host, path);
         stream.write_all(request.as_bytes())?;
-
-        parse_http_body_from_stream(stream)
-    }
-}
-
-fn parse_http_body_from_stream(
-    mut stream: impl Read,
-) -> Result<String, Box<dyn std::error::Error>> {
-    let mut response = Vec::new();
-    stream.read_to_end(&mut response)?;
+        let mut full_response = Vec::new();
+        stream.read_to_end(&mut full_response)?;
+        full_response
+    };
 
     parse_http_body(&response)
-}
-
-fn parse_http_body(response: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
-    let body_idx = response
-        .windows(4)
-        .position(|double_newline| double_newline == b"\r\n\r\n")
-        .ok_or("No response body")?;
-    Ok(String::from_utf8_lossy(&response[body_idx + 4..]).into_owned())
 }

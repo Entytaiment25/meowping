@@ -1,5 +1,6 @@
 use crate::colors::Colorize;
-use crate::https::{self};
+use crate::https;
+use crate::output::{color_time, print_statistics};
 use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt;
@@ -138,6 +139,11 @@ fn format_connection_status(
     minimal: bool,
 ) -> String {
     let show_asn = !minimal || asn != "no lookup";
+    let prefix = if minimal {
+        String::new()
+    } else {
+        format!("{} ", "[MEOWPING]".magenta())
+    };
 
     if duration < 0.0 {
         let status_message = if show_asn {
@@ -156,18 +162,10 @@ fn format_connection_status(
                 port.to_string().red()
             )
         };
-        if minimal {
-            status_message
-        } else {
-            format!("{} {}", "[MEOWPING]".magenta(), status_message)
-        }
+        format!("{}{}", prefix, status_message)
     } else {
+        let time_colored = color_time(duration as f64);
         let status_message = if show_asn {
-            let time_colored = match duration {
-                d if d >= 250.0 => format!("{:.2}ms", duration).orange(),
-                d if d >= 100.0 => format!("{:.2}ms", duration).yellow(),
-                _ => format!("{:.2}ms", duration).green(),
-            };
             format!(
                 "{} ({}): {} protocol={} port={}",
                 ip_lookup.ip().to_string().green(),
@@ -177,11 +175,6 @@ fn format_connection_status(
                 port.to_string().green()
             )
         } else {
-            let time_colored = match duration {
-                d if d >= 250.0 => format!("{:.2}ms", duration).orange(),
-                d if d >= 100.0 => format!("{:.2}ms", duration).yellow(),
-                _ => format!("{:.2}ms", duration).green(),
-            };
             format!(
                 "{}: {} protocol={} port={}",
                 ip_lookup.ip().to_string().green(),
@@ -190,50 +183,8 @@ fn format_connection_status(
                 port.to_string().green()
             )
         };
-        if minimal {
-            status_message
-        } else {
-            format!("{} {}", "[MEOWPING]".magenta(), status_message)
-        }
+        format!("{}{}", prefix, status_message)
     }
-}
-
-fn print_statistics(count: usize, successes: usize, times: &VecDeque<u128>) {
-    let failed = count - successes;
-
-    let min_time = if successes > 0 {
-        (*times.iter().filter(|&&t| t > 0).min().unwrap_or(&0) as f32) / 1000.0
-    } else {
-        0.0
-    };
-
-    let max_time = if successes > 0 {
-        (*times.iter().filter(|&&t| t > 0).max().unwrap_or(&0) as f32) / 1000.0
-    } else {
-        0.0
-    };
-
-    let avg_time = if successes > 0 {
-        (times.iter().filter(|&&t| t > 0).sum::<u128>() as f32) / (successes as f32) / 1000.0
-    } else {
-        0.0
-    };
-
-    println!("\nTCP Ping statistics:");
-    println!(
-        "\tAttempted = {}, Successes = {}, Failures = {} ({} loss)",
-        count.to_string().bright_blue(),
-        successes.to_string().bright_blue(),
-        failed.to_string().bright_blue(),
-        format!("{:.2}%", ((failed as f32) / (count as f32)) * 100.0).bright_blue()
-    );
-    println!("Approximate round trip times:");
-    println!(
-        "\tMinimum = {}, Maximum = {}, Average = {}",
-        format!("{:.2}ms", min_time).bright_blue(),
-        format!("{:.2}ms", max_time).bright_blue(),
-        format!("{:.2}ms", avg_time).bright_blue()
-    );
 }
 
 pub fn perform_tcp(
@@ -252,7 +203,7 @@ pub fn perform_tcp(
 
     let asn = fetch_asn(&ip_lookup.ip().to_string(), no_asn)?;
     let (successes, times) = perform_connection(ip_lookup, port, timeout, count, &asn, minimal);
-    print_statistics(count, successes, &times);
+    print_statistics("TCP", count, successes, &times);
 
     Ok(())
 }
