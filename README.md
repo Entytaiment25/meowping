@@ -7,7 +7,7 @@ MeowPing is a command-line utility for testing network connectivity using ICMP e
 - ICMP echo request-based network testing.
 - TCP connection-based network testing.
 - HTTP(S) request-based network testing.
-- Colorful and visually appealing output.
+- Colorful and visually appealing output, now for the response time as well.
 - Display of connection statistics including success rate, minimum, maximum, and average connection times.
 - Works with IPv4, IPv6 and Domains.
 
