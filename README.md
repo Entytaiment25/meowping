@@ -39,6 +39,8 @@ OPTIONS:
 
 ```powershell
 ./meowping 8.8.8.8 -p 53
+
+./meowping 94.249.228.0/24 -p 22
 ```
 
 **Disable ASN lookups for privacy:**
