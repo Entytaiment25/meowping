@@ -4,7 +4,7 @@ use crate::output::{color_time, print_statistics};
 use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt;
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -101,7 +101,11 @@ fn perform_connection(
 
     for _ in 0..count {
         let duration = measure_connection_time(ip_lookup, port, timeout);
-        times.push_back((duration * 1000.0) as u128);
+        if duration >= 0.0 {
+            times.push_back((duration * 1000.0) as u128);
+        } else {
+            times.push_back(0);
+        }
 
         let status_message = format_connection_status(ip_lookup, asn, port, duration, minimal);
         println!("{}", status_message);
@@ -117,11 +121,13 @@ fn perform_connection(
 }
 
 fn measure_connection_time(ip_lookup: SocketAddr, port: u16, timeout: u64) -> f32 {
+    tcp_connect_once(ip_lookup.ip(), port, timeout)
+}
+
+pub fn tcp_connect_once(ip: IpAddr, port: u16, timeout: u64) -> f32 {
     let start = Instant::now();
-    let connect_result = TcpStream::connect_timeout(
-        &SocketAddr::new(ip_lookup.ip(), port),
-        Duration::from_millis(timeout),
-    );
+    let connect_result =
+        TcpStream::connect_timeout(&SocketAddr::new(ip, port), Duration::from_millis(timeout));
     let duration = (start.elapsed().as_micros() as f32) / 1000.0;
 
     if connect_result.is_err() {

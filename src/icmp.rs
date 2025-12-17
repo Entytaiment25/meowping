@@ -268,6 +268,17 @@ mod platform {
     }
 }
 
+pub fn ping_host_once(
+    ip: Ipv4Addr,
+    seq: u16,
+    timeout: Duration,
+    ttl: u8,
+    ident: u16,
+    payload: &[u8; 24],
+) -> std::io::Result<(usize, Duration)> {
+    platform::ping_once_ipv4(ip, seq, timeout, ttl, ident, payload)
+}
+
 pub fn perform_icmp(
     destination: &str,
     timeout_ms: u64,
@@ -285,7 +296,7 @@ pub fn perform_icmp(
 
     for seq in 1..=count {
         let start = Instant::now();
-        let result = platform::ping_once_ipv4(ip, seq as u16, timeout, ttl, ident, payload);
+        let result = ping_host_once(ip, seq as u16, timeout, ttl, ident, payload);
         let elapsed_us = start.elapsed().as_micros();
 
         match result {

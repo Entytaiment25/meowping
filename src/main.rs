@@ -7,6 +7,7 @@ mod https;
 mod icmp;
 mod output;
 mod parser;
+mod subnet;
 mod tcp;
 
 use cli::Arguments;
@@ -14,6 +15,7 @@ use colors::{Colorize, HyperLink};
 use http_check::perform_http_check;
 use icmp::perform_icmp;
 use parser::{Extracted, Parser};
+use subnet::{Ipv4Subnet, perform_icmp_subnet_scan, perform_tcp_subnet_scan};
 use tcp::perform_tcp;
 
 #[cfg(target_os = "windows")]
@@ -65,12 +67,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let http_check = args.contains(["-s", "--http"]);
     let no_asn = args.contains(["-a", "--no-asn"]);
 
-    let destination = match args.free_from_str::<String>() {
+    let destination_input = match args.free_from_str::<String>() {
         Ok(dest) => dest,
         Err(_) => {
             return Err("Destination argument missing".into());
         }
     };
+
+    let subnet_target = Ipv4Subnet::from_str(&destination_input).ok();
 
     let timeout = match args.opt_value_from_str(["-t", "--timeout"]) {
         Ok(Some(t)) => t,
@@ -79,23 +83,36 @@ fn main() -> Result<(), Box<dyn Error>> {
             return Err("Failed to parse timeout argument".into());
         }
     };
-    let count = match args.opt_value_from_str(["-c", "--count"]) {
-        Ok(Some(c)) => c,
-        Ok(None) => 65535,
+    let (count, count_from_cli) = match args.opt_value_from_str(["-c", "--count"]) {
+        Ok(Some(c)) => (c, true),
+        Ok(None) => (65535, false),
         Err(_) => {
             return Err("Failed to parse count argument".into());
         }
     };
+    let per_host_attempts = if subnet_target.is_some() && !count_from_cli {
+        1
+    } else {
+        count
+    };
 
     if http_check {
-        let mut url = destination.clone();
+        if subnet_target.is_some() {
+            return Err("HTTP checking is not supported for subnet targets".into());
+        }
+        let mut url = destination_input.clone();
         if !url.starts_with("http://") && !url.starts_with("https://") {
             url = format!("http://{}", url);
         }
         return perform_http_check(&url, timeout, count, minimal);
     }
 
-    let port = args.opt_value_from_str(["-p", "--port"]);
+    let port = match args.opt_value_from_str(["-p", "--port"]) {
+        Ok(opt) => opt,
+        Err(_) => {
+            return Err("Failed to parse port argument".into());
+        }
+    };
 
     if !minimal {
         let hyperlink = HyperLink::new(name, "https://github.com/entytaiment25/meowping")
@@ -115,12 +132,35 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("{}", message);
     }
 
-    let destination = if destination.starts_with('[') && destination.ends_with(']') {
-        destination[1..destination.len() - 1].to_string()
-    } else if destination.parse::<IpAddr>().is_ok() {
-        destination
+    if let Some(subnet) = subnet_target {
+        if let Some(p) = port {
+            perform_tcp_subnet_scan(&subnet, p, timeout, per_host_attempts, minimal)?;
+        } else {
+            let ttl = 64;
+            let ident = 0;
+            let payload: [u8; 24] = [
+                46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109,
+                101, 111, 119, 46, 46, 46,
+            ];
+            perform_icmp_subnet_scan(
+                &subnet,
+                timeout,
+                ttl,
+                ident,
+                per_host_attempts,
+                &payload,
+                minimal,
+            )?;
+        }
+        return Ok(());
+    }
+
+    let destination = if destination_input.starts_with('[') && destination_input.ends_with(']') {
+        destination_input[1..destination_input.len() - 1].to_string()
+    } else if destination_input.parse::<IpAddr>().is_ok() {
+        destination_input
     } else {
-        match Parser::extract_url(&destination) {
+        match Parser::extract_url(&destination_input) {
             Extracted::Error => {
                 let message = "DNS Lookup of domain failed: Invalid host or URL";
                 if !minimal {
@@ -135,8 +175,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     match port {
-        Ok(Some(p)) => perform_tcp(&destination, p, timeout, count.into(), minimal, no_asn)?,
-        Ok(None) => {
+        Some(p) => perform_tcp(&destination, p, timeout, count.into(), minimal, no_asn)?,
+        None => {
             let ttl = 64;
             let ident = 0;
             let payload: [u8; 24] = [
@@ -144,9 +184,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 101, 111, 119, 46, 46, 46,
             ];
             perform_icmp(&destination, timeout, ttl, ident, count, &payload, minimal)?;
-        }
-        Err(_) => {
-            return Err("Failed to parse port argument".into());
         }
     }
 
