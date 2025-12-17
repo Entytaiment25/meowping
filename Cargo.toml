@@ -38,7 +38,7 @@ strip = "symbols"
 native-tls = "0.2.14"
 
 [target.'cfg(unix)'.dependencies]
-libc = { version = "0.2.177" }
+libc = { version = "0.2.178" }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
