@@ -322,7 +322,9 @@ pub fn perform_tcp_subnet_scan(
     for attempt_idx in 0..attempts {
         for chunk in hosts.chunks(chunk_size) {
             let results = tcp_probe_chunk(chunk, port, timeout_ms);
-            print_chunk_row(&results, minimal, attempt_idx + 1, attempts);
+            if !minimal {
+                print_chunk_row(&results, minimal, attempt_idx + 1, attempts);
+            }
 
             for status in &results {
                 if let Some(latency) = status.latency_us {
@@ -337,6 +339,20 @@ pub fn perform_tcp_subnet_scan(
     }
 
     let total_attempts = hosts.len() * attempts;
+
+    if minimal {
+        let mut responsive_list: Vec<Ipv4Addr> = responsive_hosts.iter().cloned().collect();
+        responsive_list.sort();
+        if !responsive_list.is_empty() {
+            let entries = responsive_list
+                .iter()
+                .map(|ip| ip.to_string().green())
+                .collect::<Vec<_>>()
+                .join(", ");
+            print_with_prefix(minimal, format!("[{}]", entries));
+        }
+    }
+
     print_host_summary(hosts.len(), responsive_hosts.len(), minimal);
     print_statistics("TCP subnet", total_attempts, successes, &times);
     Ok(())
@@ -395,7 +411,9 @@ pub fn perform_icmp_subnet_scan(
             }
 
             let results = icmp_probe_chunk(&batch, timeout, ttl, ident, payload);
-            print_chunk_row(&results, minimal, attempt_idx + 1, attempts);
+            if !minimal {
+                print_chunk_row(&results, minimal, attempt_idx + 1, attempts);
+            }
 
             for status in &results {
                 if let Some(latency) = status.latency_us {
@@ -410,6 +428,20 @@ pub fn perform_icmp_subnet_scan(
     }
 
     let total_attempts = hosts.len() * attempts;
+
+    if minimal {
+        let mut responsive_list: Vec<Ipv4Addr> = responsive_hosts.iter().cloned().collect();
+        responsive_list.sort();
+        if !responsive_list.is_empty() {
+            let entries = responsive_list
+                .iter()
+                .map(|ip| ip.to_string().green())
+                .collect::<Vec<_>>()
+                .join(", ");
+            print_with_prefix(minimal, format!("[{}]", entries));
+        }
+    }
+
     print_host_summary(hosts.len(), responsive_hosts.len(), minimal);
     print_statistics("ICMP subnet", total_attempts, successes, &times);
     Ok(())
