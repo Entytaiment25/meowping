@@ -1,3 +1,89 @@
+/// Parallel TCP scan for arbitrary host lists (not subnets)
+fn perform_tcp_multi_scan(
+    hosts: &[String],
+    port: u16,
+    timeout_ms: u64,
+    attempts_per_host: usize,
+    minimal: bool,
+    no_asn: bool,
+) {
+    use std::collections::{HashSet, VecDeque};
+    use crate::tcp::{resolve_ip, fetch_asn};
+    use crate::colors::Colorize;
+    use crate::output::{print_statistics, print_with_prefix};
+
+    let attempts = attempts_per_host.max(1);
+    let chunk_size = hosts.len().min(32);
+    let mut times = VecDeque::new();
+    let mut successes = 0usize;
+    let mut responsive_hosts: HashSet<String> = HashSet::new();
+
+    for attempt_idx in 0..attempts {
+        if !minimal && attempts > 1 {
+            print_with_prefix(minimal, format!("Attempt {}/{}", attempt_idx + 1, attempts));
+        }
+        for chunk in hosts.chunks(chunk_size) {
+            let mut results = Vec::with_capacity(chunk.len());
+            let mut handles = Vec::with_capacity(chunk.len());
+            for host in chunk {
+                let host = host.clone();
+                let port = port;
+                let timeout_ms = timeout_ms;
+                let no_asn = no_asn;
+                handles.push(std::thread::spawn(move || {
+                    let ip: std::net::SocketAddr = match resolve_ip(&host, port) {
+                        Ok(ip) => ip,
+                        Err(_) => return (host.clone(), None, "resolve error".to_string()),
+                    };
+                    let asn = fetch_asn(&ip.ip().to_string(), no_asn).unwrap_or_else(|_| "?".to_string());
+                    let latency_ms = crate::tcp::tcp_connect_once(ip.ip(), port, timeout_ms);
+                    if latency_ms >= 0.0 {
+                        (host.clone(), Some((latency_ms * 1000.0) as u128), asn)
+                    } else {
+                        (host.clone(), None, asn)
+                    }
+                }));
+            }
+            for handle in handles {
+                let (host, latency_us, asn) = handle.join().unwrap();
+                results.push((host, latency_us, asn));
+            }
+            // Output like print_chunk_row
+            for (host, latency_us, asn) in &results {
+                let entry = if let Some(lat) = latency_us {
+                    format!("  {} ({}): {} protocol={} port={}", host.green(), asn.green(), crate::output::color_time((*lat as f64) / 1000.0), "TCP".green(), port.to_string().green())
+                } else {
+                    format!("  {} timed out ({}): protocol={} port={}", host.red(), asn.red(), "TCP".red(), port.to_string().red())
+                };
+                print_with_prefix(minimal, entry);
+            }
+            for (host, latency_us, _) in &results {
+                if let Some(lat) = latency_us {
+                    successes += 1;
+                    responsive_hosts.insert(host.clone());
+                    times.push_back(*lat);
+                } else {
+                    times.push_back(0);
+                }
+            }
+        }
+    }
+    let total_attempts = hosts.len() * attempts;
+    if minimal {
+        let mut responsive_list: Vec<String> = responsive_hosts.iter().cloned().collect();
+        responsive_list.sort();
+        if !responsive_list.is_empty() {
+            let entries = responsive_list
+                .iter()
+                .map(|ip| ip.green())
+                .collect::<Vec<_>>()
+                .join(", ");
+            print_with_prefix(minimal, format!("[{}]", entries));
+        }
+    }
+    print_with_prefix(minimal, format!("Hosts responsive: {}/{}", responsive_hosts.len().to_string().green(), hosts.len()));
+    print_statistics("TCP multi", total_attempts, successes, &times);
+}
 use std::{error::Error, net::IpAddr};
 
 mod cli;
@@ -20,6 +106,25 @@ use tcp::perform_tcp;
 
 #[cfg(target_os = "windows")]
 use colors::fix_ansicolor;
+
+fn parse_multiple_destinations(input: &str) -> Vec<String> {
+    let trimmed = input.trim();
+    if trimmed.starts_with('[') && trimmed.ends_with(']') {
+        trimmed[1..trimmed.len() - 1]
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    } else if trimmed.contains(',') {
+        trimmed
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    } else {
+        vec![trimmed.to_string()]
+    }
+}
 
 fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(target_os = "windows")]
@@ -74,7 +179,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let subnet_target = Ipv4Subnet::from_str(&destination_input).ok();
+    let destinations = parse_multiple_destinations(&destination_input);
+    let is_multi = destinations.len() > 1;
+    let subnet_target = if !is_multi {
+        Ipv4Subnet::from_str(&destination_input).ok()
+    } else {
+        None
+    };
 
     let timeout = match args.opt_value_from_str(["-t", "--timeout"]) {
         Ok(Some(t)) => t,
@@ -100,11 +211,22 @@ fn main() -> Result<(), Box<dyn Error>> {
         if subnet_target.is_some() {
             return Err("HTTP checking is not supported for subnet targets".into());
         }
-        let mut url = destination_input.clone();
-        if !url.starts_with("http://") && !url.starts_with("https://") {
-            url = format!("http://{}", url);
+        if is_multi {
+            for url in &destinations {
+                let mut url = url.clone();
+                if !url.starts_with("http://") && !url.starts_with("https://") {
+                    url = format!("http://{}", url);
+                }
+                let _ = perform_http_check(&url, timeout, count, minimal);
+            }
+            return Ok(());
+        } else {
+            let mut url = destination_input.clone();
+            if !url.starts_with("http://") && !url.starts_with("https://") {
+                url = format!("http://{}", url);
+            }
+            return perform_http_check(&url, timeout, count, minimal);
         }
-        return perform_http_check(&url, timeout, count, minimal);
     }
 
     let port = match args.opt_value_from_str(["-p", "--port"]) {
@@ -155,35 +277,69 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    let destination = if destination_input.starts_with('[') && destination_input.ends_with(']') {
-        destination_input[1..destination_input.len() - 1].to_string()
-    } else if destination_input.parse::<IpAddr>().is_ok() {
-        destination_input
-    } else {
-        match Parser::extract_url(&destination_input) {
-            Extracted::Error => {
-                let message = "DNS Lookup of domain failed: Invalid host or URL";
-                if !minimal {
-                    println!("{} {}", "[MEOWPING]".magenta(), message);
+    if is_multi {
+        if let Some(p) = port {
+            perform_tcp_multi_scan(&destinations, p, timeout, count, minimal, no_asn);
+        } else {
+            // ICMP multi-host not parallelized here, fallback to sequential
+            for dest in &destinations {
+                let destination = if dest.parse::<IpAddr>().is_ok() {
+                    dest.clone()
                 } else {
-                    println!("{}", message);
+                    match Parser::extract_url(dest) {
+                        Extracted::Error => {
+                            let message = format!("DNS Lookup of domain failed: Invalid host or URL: {}", dest);
+                            if !minimal {
+                                println!("{} {}", "[MEOWPING]".magenta(), message);
+                            } else {
+                                println!("{}", message);
+                            }
+                            continue;
+                        }
+                        Extracted::Success(host) => host,
+                    }
+                };
+                if !minimal {
+                    println!("\n[MEOWPING] Scanning host: {}", destination.green());
                 }
-                return Ok(());
+                let ttl = 64;
+                let ident = 0;
+                let payload: [u8; 24] = [
+                    46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109,
+                    101, 111, 119, 46, 46, 46,
+                ];
+                let _ = perform_icmp(&destination, timeout, ttl, ident, count, &payload, minimal);
             }
-            Extracted::Success(host) => host,
         }
-    };
-
-    match port {
-        Some(p) => perform_tcp(&destination, p, timeout, count.into(), minimal, no_asn)?,
-        None => {
-            let ttl = 64;
-            let ident = 0;
-            let payload: [u8; 24] = [
-                46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109,
-                101, 111, 119, 46, 46, 46,
-            ];
-            perform_icmp(&destination, timeout, ttl, ident, count, &payload, minimal)?;
+        return Ok(());
+    } else {
+        let destination = if destination_input.parse::<IpAddr>().is_ok() {
+            destination_input.clone()
+        } else {
+            match Parser::extract_url(&destination_input) {
+                Extracted::Error => {
+                    let message = "DNS Lookup of domain failed: Invalid host or URL";
+                    if !minimal {
+                        println!("{} {}", "[MEOWPING]".magenta(), message);
+                    } else {
+                        println!("{}", message);
+                    }
+                    return Ok(());
+                }
+                Extracted::Success(host) => host,
+            }
+        };
+        match port {
+            Some(p) => perform_tcp(&destination, p, timeout, count.into(), minimal, no_asn)?,
+            None => {
+                let ttl = 64;
+                let ident = 0;
+                let payload: [u8; 24] = [
+                    46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109,
+                    101, 111, 119, 46, 46, 46,
+                ];
+                perform_icmp(&destination, timeout, ttl, ident, count, &payload, minimal)?;
+            }
         }
     }
 

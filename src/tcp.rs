@@ -19,7 +19,7 @@ impl fmt::Display for MeowpingError {
 
 impl Error for MeowpingError {}
 
-fn resolve_ip(destination: &str, port: u16) -> Result<SocketAddr, Box<dyn Error>> {
+pub fn resolve_ip(destination: &str, port: u16) -> Result<SocketAddr, Box<dyn Error>> {
     if let Ok(ip) = destination.parse::<std::net::IpAddr>() {
         return Ok(SocketAddr::new(ip, port));
     }
@@ -38,7 +38,7 @@ fn is_private_ip(ip_addr: &std::net::IpAddr) -> bool {
     }
 }
 
-fn fetch_asn(ip: &str, no_api: bool) -> Result<String, Box<dyn Error>> {
+pub fn fetch_asn(ip: &str, no_api: bool) -> Result<String, Box<dyn Error>> {
     let ip_addr: std::net::IpAddr = ip.parse()?;
 
     if ip_addr.is_loopback() || is_private_ip(&ip_addr) {
@@ -88,7 +88,7 @@ fn print_ip_info(destination: &str, ip: &str, minimal: bool) {
     );
 }
 
-fn perform_connection(
+pub fn perform_connection(
     ip_lookup: SocketAddr,
     port: u16,
     timeout: u64,

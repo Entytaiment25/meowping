@@ -23,7 +23,7 @@ MeowPing offers a simple command-line interface with various options:
 meowping <destination> [OPTIONS]
 
 ARGS:
-    <destination>           Specify the destination to ping (can be an IP address or domain name)
+    <destination>           Specify the destination(s) to ping (can be an IP address, domain name, or a comma-separated list or [list,of,hosts])
 
 OPTIONS:
     -h, --help              Prints the Help Menu
@@ -35,11 +35,20 @@ OPTIONS:
     -a, --no-asn            Disable ASN/organization lookups (use static data)
 ```
 
+
 ### Example Usage
 
 ```powershell
+# Single host
 ./meowping 8.8.8.8 -p 53
 
+# Multiple hosts (comma-separated)
+./meowping 1.1.1.1,8.8.8.8,example.com -p 53
+
+# Multiple hosts (bracketed)
+./meowping [1.1.1.1,8.8.8.8,example.com] -p 53
+
+# Subnet scan
 ./meowping 94.249.228.0/24 -p 22
 ```
 
@@ -67,4 +76,3 @@ sudo ./meowping
 
 ## License
 This project is MIT licensed. You're free to use, modify, and distribute it, but please provide attribution to the original author if you incorporate this code into your project. This supports open-source and recognizes contributors' work.
-
