@@ -12,9 +12,9 @@ else
     fi
 fi
 
-# On macOS, ICMP requires sudo
+# On macOS and Linux, ICMP requires sudo
 USE_SUDO_ICMP=""
-if [[ "$(uname)" == "Darwin" ]]; then
+if [[ "$(uname)" == "Darwin" || "$(uname)" == "Linux" ]]; then
     USE_SUDO_ICMP="sudo"
 fi
 
