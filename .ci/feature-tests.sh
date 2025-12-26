@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+
 if command -v meowping >/dev/null 2>&1; then
     MEOWPING="meowping"
 else
@@ -11,7 +12,13 @@ else
     fi
 fi
 
-OUTPUT1=$($MEOWPING 1.1.1.1 -c 1 -m -p 53)
+# On macOS, ICMP requires sudo
+USE_SUDO_ICMP=""
+if [[ "$(uname)" == "Darwin" ]]; then
+    USE_SUDO_ICMP="sudo"
+fi
+
+OUTPUT1=$($USE_SUDO_ICMP $MEOWPING 1.1.1.1 -c 1 -m -p 53)
 if ! echo "$OUTPUT1" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Cloudflare"; then
     echo "Test failed: Expected output to contain 'Cloudflare'"
     echo "Actual output:"
@@ -27,7 +34,7 @@ if ! echo "$OUTPUT2" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "AS13335 Cloudflare, 
     exit 1
 fi
 
-OUTPUT3=$($MEOWPING https://cloudflare.com -c 1 -m)
+OUTPUT3=$($USE_SUDO_ICMP $MEOWPING https://cloudflare.com -c 1 -m)
 if ! echo "$OUTPUT3" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Reply from"; then
     echo "Test failed: Expected output to contain 'Reply from' for https://cloudflare.com"
     echo "Actual output:"
@@ -82,7 +89,7 @@ if ! echo "$OUTPUT7" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Hosts responsive: 2/
 fi
 
 # Test multi-host ICMP ping in minimal mode
-OUTPUT8=$($MEOWPING 1.1.1.1,8.8.8.8 -c 1 -m)
+OUTPUT8=$($USE_SUDO_ICMP $MEOWPING 1.1.1.1,8.8.8.8 -c 1 -m)
 REPLY_COUNT=$(echo "$OUTPUT8" | sed 's/\x1b\[[0-9;]*m//g' | grep -c "Reply from")
 if [ "$REPLY_COUNT" -ne 2 ]; then
     echo "Test failed: Expected 2 'Reply from' in multi-host ICMP minimal output, got $REPLY_COUNT"
@@ -92,7 +99,7 @@ if [ "$REPLY_COUNT" -ne 2 ]; then
 fi
 
 # Test multi-host ICMP ping in normal mode
-OUTPUT9=$($MEOWPING 1.1.1.1,8.8.8.8 -c 1)
+OUTPUT9=$($USE_SUDO_ICMP $MEOWPING 1.1.1.1,8.8.8.8 -c 1)
 if ! echo "$OUTPUT9" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "\[MEOWPING\] Scanning host"; then
     echo "Test failed: Expected '[MEOWPING] Scanning host' in multi-host ICMP normal output"
     echo "Actual output:"
