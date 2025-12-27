@@ -1,4 +1,3 @@
-/// Parallel TCP scan for arbitrary host lists (not subnets)
 fn perform_tcp_multi_scan(
     hosts: &[String],
     port: u16,
@@ -24,38 +23,29 @@ fn perform_tcp_multi_scan(
         }
         for chunk in hosts.chunks(chunk_size) {
             let mut results = Vec::with_capacity(chunk.len());
-            let mut handles = Vec::with_capacity(chunk.len());
             for host in chunk {
                 let host = host.clone();
-                let port = port;
-                let timeout_ms = timeout_ms;
-                let no_asn = no_asn;
-                handles.push(std::thread::spawn(move || {
-                    let ip: std::net::SocketAddr = match resolve_ip(&host, port) {
-                        Ok(ip) => ip,
-                        Err(_) => return (host.clone(), None, "resolve error".to_string()),
-                    };
-                    let asn = fetch_asn(&ip.ip().to_string(), no_asn).unwrap_or_else(|_| "?".to_string());
-                    let latency_ms = crate::tcp::tcp_connect_once(ip.ip(), port, timeout_ms);
-                    if latency_ms >= 0.0 {
-                        (host.clone(), Some((latency_ms * 1000.0) as u128), asn)
-                    } else {
-                        (host.clone(), None, asn)
+                let ip: std::net::SocketAddr = match resolve_ip(&host, port) {
+                    Ok(ip) => ip,
+                    Err(_) => {
+                        let entry = format!("  {} timed out ({}): protocol={} port={}", host.red(), "resolve error".red(), "TCP".red(), port.to_string().red());
+                        print_with_prefix(minimal, entry);
+                        results.push((host.clone(), None, "resolve error".to_string()));
+                        std::thread::sleep(std::time::Duration::from_millis(1000));
+                        continue;
                     }
-                }));
-            }
-            for handle in handles {
-                let (host, latency_us, asn) = handle.join().unwrap();
-                results.push((host, latency_us, asn));
-            }
-            // Output like print_chunk_row
-            for (host, latency_us, asn) in &results {
-                let entry = if let Some(lat) = latency_us {
-                    format!("  {} ({}): {} protocol={} port={}", host.green(), asn.green(), crate::output::color_time((*lat as f64) / 1000.0), "TCP".green(), port.to_string().green())
+                };
+                let asn = fetch_asn(&ip.ip().to_string(), no_asn).unwrap_or_else(|_| "?".to_string());
+                let latency_ms = crate::tcp::tcp_connect_once(ip.ip(), port, timeout_ms);
+                let (latency_us, entry) = if latency_ms >= 0.0 {
+                    let us = (latency_ms * 1000.0) as u128;
+                    (Some(us), format!("  {} ({}): {} protocol={} port={}", host.green(), asn.green(), crate::output::color_time((us as f64) / 1000.0), "TCP".green(), port.to_string().green()))
                 } else {
-                    format!("  {} timed out ({}): protocol={} port={}", host.red(), asn.red(), "TCP".red(), port.to_string().red())
+                    (None, format!("  {} timed out ({}): protocol={} port={}", host.red(), asn.red(), "TCP".red(), port.to_string().red()))
                 };
                 print_with_prefix(minimal, entry);
+                results.push((host.clone(), latency_us, asn));
+                std::thread::sleep(std::time::Duration::from_millis(1000));
             }
             for (host, latency_us, _) in &results {
                 if let Some(lat) = latency_us {
@@ -281,7 +271,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         if let Some(p) = port {
             perform_tcp_multi_scan(&destinations, p, timeout, count, minimal, no_asn);
         } else {
-            // ICMP multi-host not parallelized here, fallback to sequential
             for dest in &destinations {
                 let destination = if dest.parse::<IpAddr>().is_ok() {
                     dest.clone()
