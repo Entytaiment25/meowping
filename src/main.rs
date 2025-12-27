@@ -169,7 +169,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let destinations = parse_multiple_destinations(&destination_input);
+    let mut destinations = parse_multiple_destinations(&destination_input);
+    if destinations.len() > 1 {
+        use std::collections::HashSet;
+        let mut seen = HashSet::new();
+        destinations.retain(|d| seen.insert(d.clone()));
+    }
     let is_multi = destinations.len() > 1;
     let subnet_target = if !is_multi {
         Ipv4Subnet::from_str(&destination_input).ok()
