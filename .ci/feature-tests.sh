@@ -31,6 +31,7 @@ if ! echo "$OUTPUT1" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Cloudflare"; then
     exit 1
 fi
 
+MEOWPING="$MEOWPING_PATH"
 OUTPUT2=$($MEOWPING https://cloudflare.com -c 1 -m -p 443)
 if ! echo "$OUTPUT2" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "AS13335 Cloudflare, Inc"; then
     echo "Test failed: Expected output to contain 'AS13335 Cloudflare, Inc' for https://cloudflare.com"
