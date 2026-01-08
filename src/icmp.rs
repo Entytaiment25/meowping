@@ -127,11 +127,9 @@ mod platform {
         packet[7] = (seq & 0xff) as u8;
         packet[8..8 + payload.len()].copy_from_slice(payload);
 
-        if !is_linux {
-            let csum = icmp_checksum(&packet);
-            packet[2] = (csum >> 8) as u8;
-            packet[3] = (csum & 0xff) as u8;
-        }
+        let csum = icmp_checksum(&packet);
+        packet[2] = (csum >> 8) as u8;
+        packet[3] = (csum & 0xff) as u8;
 
         let mut addr: libc::sockaddr_in = unsafe { mem::zeroed() };
         addr.sin_family = libc::AF_INET as libc::sa_family_t;

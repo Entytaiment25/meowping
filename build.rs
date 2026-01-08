@@ -22,7 +22,7 @@ mod windows {
         let patch = env!("CARGO_PKG_VERSION_PATCH");
         let full = env!("CARGO_PKG_VERSION");
         let description = env!("CARGO_PKG_DESCRIPTION");
-        let auhtor = env!("CARGO_PKG_AUTHORS");
+        let author = env!("CARGO_PKG_AUTHORS");
         let name = env!("CARGO_PKG_NAME");
 
         fs::write(
@@ -34,7 +34,7 @@ mod windows {
     #define VERSION_PATCH {patch}
     #define VERSION_FULL \"{full}\"
     #define VERSION_DESCRIPTION  \"{description}\"
-    #define VERSION_AUTHOR  \"{auhtor}\"
+    #define VERSION_AUTHOR  \"{author}\"
     #define VERSION_NAME \"{name}\"
     "
             ),

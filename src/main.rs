@@ -35,7 +35,7 @@ fn perform_tcp_multi_scan(
                         continue;
                     }
                 };
-                let asn = fetch_asn(&ip.ip().to_string(), no_asn).unwrap_or_else(|_| "?".to_string());
+                 let asn = fetch_asn(&ip.ip().to_string(), no_asn, timeout_ms).unwrap_or_else(|_| "?".to_string());
                 let latency_ms = crate::tcp::tcp_connect_once(ip.ip(), port, timeout_ms);
                 let (latency_us, entry) = if latency_ms >= 0.0 {
                     let us = (latency_ms * 1000.0) as u128;
