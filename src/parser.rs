@@ -69,3 +69,22 @@ pub enum Extracted {
     Success(String),
     Error,
 }
+
+pub fn parse_multiple_destinations(input: &str) -> Vec<String> {
+    let trimmed = input.trim();
+    if trimmed.starts_with('[') && trimmed.ends_with(']') {
+        trimmed[1..trimmed.len() - 1]
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    } else if trimmed.contains(',') {
+        trimmed
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    } else {
+        vec![trimmed.to_string()]
+    }
+}

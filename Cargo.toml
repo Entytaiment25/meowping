@@ -1,6 +1,6 @@
 [package]
 name = "meowping"
-version = "1.9.9"
+version = "2.0.0"
 authors = ["Entytaiment25"]
 edition = "2024"
 rust-version = "1.89.0"
@@ -38,7 +38,7 @@ strip = "symbols"
 native-tls = "0.2.14"
 
 [target.'cfg(unix)'.dependencies]
-libc = { version = "0.2.178" }
+libc = { version = "0.2.180" }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [

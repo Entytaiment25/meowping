@@ -1,4 +1,4 @@
-use crate::colors::Colorize;
+use crate::colors::{Colorize, HyperLink};
 use std::collections::VecDeque;
 
 pub fn print_with_prefix(minimal: bool, message: String) {
@@ -53,4 +53,39 @@ pub fn color_time(time_ms: f64) -> String {
         t if t >= 100.0 => msg.yellow(),
         _ => msg.green(),
     }
+}
+
+pub fn print_help() {
+    let name = env!("CARGO_PKG_NAME");
+    println!("Usage: {} <destination> [options]\n", name);
+    println!("Optional Options:");
+    println!("    -h, --help                Prints the Help Menu");
+    println!("    -p, --port <port>         Set the port number (default: ICMP, with: TCP)");
+    println!(
+        "    -t, --timeout <timeout>   Set the timeout for each connection attempt in milliseconds (default: 1000ms)"
+    );
+    println!(
+        "    -c, --count <count>       Set the number of connection attempts (default: 65535)"
+    );
+    println!("    -m, --minimal             Changes the Prints to be more Minimal");
+    println!("    -s, --http              Check if the destination URL is online via HTTP/S");
+    println!("    -a, --no-asn            Disable ASN/organization lookups (use static data)");
+}
+
+pub fn print_welcome() {
+    let version_format = format!("v.{}", env!("CARGO_PKG_VERSION"));
+    let name = env!("CARGO_PKG_NAME");
+    let hyperlink =
+        HyperLink::new(name, "https://github.com/entytaiment25/meowping").expect("valid hyperlink");
+    let message = format!(
+        "
+    ／l、
+  （ﾟ､ ｡ ７      welcome to {}!
+    l  ~ヽ       {}
+    じしf_,)ノ
+",
+        hyperlink, version_format
+    )
+    .magenta();
+    println!("{}", message);
 }

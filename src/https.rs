@@ -59,9 +59,7 @@ fn connect_tcp(
 
 fn read_response(mut stream: impl Read) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let mut response = Vec::new();
-    let mut buffer = [0; 4096];
-    let bytes_read = stream.read(&mut buffer)?;
-    response.extend_from_slice(&buffer[..bytes_read]);
+    stream.read_to_end(&mut response)?;
     Ok(response)
 }
 fn get_http_status(

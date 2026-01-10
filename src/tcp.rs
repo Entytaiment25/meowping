@@ -38,7 +38,7 @@ fn is_private_ip(ip_addr: &std::net::IpAddr) -> bool {
     }
 }
 
-pub fn fetch_asn(ip: &str, no_api: bool) -> Result<String, Box<dyn Error>> {
+pub fn fetch_asn(ip: &str, no_api: bool, timeout: u64) -> Result<String, Box<dyn Error>> {
     let ip_addr: std::net::IpAddr = ip.parse()?;
 
     if ip_addr.is_loopback() || is_private_ip(&ip_addr) {
@@ -51,7 +51,7 @@ pub fn fetch_asn(ip: &str, no_api: bool) -> Result<String, Box<dyn Error>> {
 
     let url = format!("https://ipinfo.io/{}/json", ip);
     let response_text =
-        https::get(&url, 5000).map_err(|e| Box::new(MeowpingError(e.to_string())))?;
+        https::get(&url, timeout).map_err(|e| Box::new(MeowpingError(e.to_string())))?;
     extract_asn_from_response(&response_text)
 }
 
@@ -207,9 +207,117 @@ pub fn perform_tcp(
         print_ip_info(destination, &ip_lookup.ip().to_string(), minimal);
     }
 
-    let asn = fetch_asn(&ip_lookup.ip().to_string(), no_asn)?;
+    let asn = fetch_asn(&ip_lookup.ip().to_string(), no_asn, timeout)?;
     let (successes, times) = perform_connection(ip_lookup, port, timeout, count, &asn, minimal);
     print_statistics("TCP", count, successes, &times);
 
     Ok(())
+}
+
+pub fn perform_tcp_multi_scan(
+    hosts: &[String],
+    port: u16,
+    timeout_ms: u64,
+    attempts_per_host: usize,
+    minimal: bool,
+    no_asn: bool,
+) {
+    use crate::output::print_with_prefix;
+    use std::collections::HashSet;
+
+    let attempts = attempts_per_host.max(1);
+    let chunk_size = hosts.len().min(32);
+    let mut times = VecDeque::new();
+    let mut successes = 0usize;
+    let mut responsive_hosts: HashSet<String> = HashSet::new();
+
+    for attempt_idx in 0..attempts {
+        if !minimal && attempts > 1 {
+            print_with_prefix(minimal, format!("Attempt {}/{}", attempt_idx + 1, attempts));
+        }
+        for chunk in hosts.chunks(chunk_size) {
+            let mut results = Vec::with_capacity(chunk.len());
+            for host in chunk {
+                let host = host.clone();
+                let ip: SocketAddr = match resolve_ip(&host, port) {
+                    Ok(ip) => ip,
+                    Err(_) => {
+                        let entry = format!(
+                            "  {} timed out ({}): protocol={} port={}",
+                            host.red(),
+                            "resolve error".red(),
+                            "TCP".red(),
+                            port.to_string().red()
+                        );
+                        print_with_prefix(minimal, entry);
+                        results.push((host.clone(), None, "resolve error".to_string()));
+                        sleep(Duration::from_millis(1000));
+                        continue;
+                    }
+                };
+                let asn = fetch_asn(&ip.ip().to_string(), no_asn, timeout_ms)
+                    .unwrap_or_else(|_| "?".to_string());
+                let latency_ms = tcp_connect_once(ip.ip(), port, timeout_ms);
+                let (latency_us, entry) = if latency_ms >= 0.0 {
+                    let us = (latency_ms * 1000.0) as u128;
+                    (
+                        Some(us),
+                        format!(
+                            "  {} ({}): {} protocol={} port={}",
+                            host.green(),
+                            asn.green(),
+                            color_time((us as f64) / 1000.0),
+                            "TCP".green(),
+                            port.to_string().green()
+                        ),
+                    )
+                } else {
+                    (
+                        None,
+                        format!(
+                            "  {} timed out ({}): protocol={} port={}",
+                            host.red(),
+                            asn.red(),
+                            "TCP".red(),
+                            port.to_string().red()
+                        ),
+                    )
+                };
+                print_with_prefix(minimal, entry);
+                results.push((host.clone(), latency_us, asn));
+                sleep(Duration::from_millis(1000));
+            }
+            for (host, latency_us, _) in &results {
+                if let Some(lat) = latency_us {
+                    successes += 1;
+                    responsive_hosts.insert(host.clone());
+                    times.push_back(*lat);
+                } else {
+                    times.push_back(0);
+                }
+            }
+        }
+    }
+    let total_attempts = hosts.len() * attempts;
+    if minimal {
+        let mut responsive_list: Vec<String> = responsive_hosts.iter().cloned().collect();
+        responsive_list.sort();
+        if !responsive_list.is_empty() {
+            let entries = responsive_list
+                .iter()
+                .map(|ip| ip.green())
+                .collect::<Vec<_>>()
+                .join(", ");
+            print_with_prefix(minimal, format!("[{}]", entries));
+        }
+    }
+    print_with_prefix(
+        minimal,
+        format!(
+            "Hosts responsive: {}/{}",
+            responsive_hosts.len().to_string().green(),
+            hosts.len()
+        ),
+    );
+    print_statistics("TCP multi", total_attempts, successes, &times);
 }

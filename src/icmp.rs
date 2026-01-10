@@ -5,6 +5,15 @@ use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
+// Default ICMP payload: "...meow...meow...meow..."
+pub const DEFAULT_ICMP_PAYLOAD: [u8; 24] = [
+    46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109, 101, 111, 119,
+    46, 46, 46,
+];
+
+pub const DEFAULT_TTL: u8 = 64;
+pub const DEFAULT_IDENT: u16 = 0;
+
 fn resolve_ipv4(host: &str) -> std::io::Result<Ipv4Addr> {
     if let Ok(ip) = host.parse::<Ipv4Addr>() {
         return Ok(ip);
@@ -127,11 +136,9 @@ mod platform {
         packet[7] = (seq & 0xff) as u8;
         packet[8..8 + payload.len()].copy_from_slice(payload);
 
-        if !is_linux {
-            let csum = icmp_checksum(&packet);
-            packet[2] = (csum >> 8) as u8;
-            packet[3] = (csum & 0xff) as u8;
-        }
+        let csum = icmp_checksum(&packet);
+        packet[2] = (csum >> 8) as u8;
+        packet[3] = (csum & 0xff) as u8;
 
         let mut addr: libc::sockaddr_in = unsafe { mem::zeroed() };
         addr.sin_family = libc::AF_INET as libc::sa_family_t;
