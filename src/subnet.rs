@@ -4,7 +4,7 @@ use crate::output::{color_time, print_statistics, print_with_prefix};
 use crate::tcp::tcp_connect_once;
 use std::collections::{HashSet, VecDeque};
 use std::error::Error;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::thread;
 use std::time::Duration;
 
@@ -128,11 +128,144 @@ impl Iterator for SubnetHostIter {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct Ipv6Subnet {
+    network: u128,
+    prefix: u8,
+}
+
+impl Ipv6Subnet {
+    pub fn from_str(input: &str) -> Result<Self, &'static str> {
+        let trimmed = input.trim();
+        let mut parts = trimmed.split('/');
+        let ip_part = parts
+            .next()
+            .ok_or("Missing IPv6 segment in subnet definition")?;
+        let prefix_part = parts
+            .next()
+            .ok_or("Missing prefix length in subnet definition")?;
+
+        if parts.next().is_some() {
+            return Err("Too many '/' characters in subnet definition");
+        }
+
+        let ip = ip_part
+            .parse::<Ipv6Addr>()
+            .map_err(|_| "Invalid IPv6 address in subnet definition")?;
+        let prefix = prefix_part
+            .parse::<u8>()
+            .map_err(|_| "Invalid prefix length in subnet definition")?;
+
+        if prefix > 128 {
+            return Err("Prefix length must be between 0 and 128");
+        }
+
+        let mask = if prefix == 0 {
+            0
+        } else if prefix == 128 {
+            !0u128
+        } else {
+            (!0u128) << (128 - prefix)
+        };
+        let network = u128::from(ip) & mask;
+
+        Ok(Self { network, prefix })
+    }
+
+    pub fn notation(&self) -> String {
+        format!("{}/{}", Ipv6Addr::from(self.network), self.prefix)
+    }
+
+    pub fn host_count(&self) -> u128 {
+        let host_bits = 128u32.saturating_sub(self.prefix as u32);
+        if host_bits >= 64 {
+            // Too many hosts to reasonably scan
+            return u128::MAX;
+        }
+        let total_addresses = 1u128 << host_bits;
+
+        if self.prefix >= 127 {
+            total_addresses
+        } else if total_addresses <= 2 {
+            0
+        } else {
+            total_addresses.saturating_sub(2)
+        }
+    }
+
+    pub fn iter_hosts(&self) -> Ipv6SubnetHostIter {
+        let host_bits = 128u32.saturating_sub(self.prefix as u32);
+
+        // Limit scanning to reasonable subnet sizes (max /112 = 65536 addresses)
+        if host_bits > 16 {
+            return Ipv6SubnetHostIter::empty();
+        }
+
+        let total_addresses = 1u128 << host_bits;
+        if total_addresses == 0 {
+            return Ipv6SubnetHostIter::empty();
+        }
+
+        let network = self.network;
+        let (start, end) = if self.prefix >= 127 {
+            (network, network.saturating_add(total_addresses - 1))
+        } else {
+            if total_addresses <= 2 {
+                return Ipv6SubnetHostIter::empty();
+            }
+            (network + 1, network.saturating_add(total_addresses - 2))
+        };
+
+        if start > end {
+            return Ipv6SubnetHostIter::empty();
+        }
+
+        Ipv6SubnetHostIter {
+            current: start,
+            end,
+            finished: false,
+        }
+    }
+}
+
+pub struct Ipv6SubnetHostIter {
+    current: u128,
+    end: u128,
+    finished: bool,
+}
+
+impl Ipv6SubnetHostIter {
+    fn empty() -> Self {
+        Self {
+            current: 0,
+            end: 0,
+            finished: true,
+        }
+    }
+}
+
+impl Iterator for Ipv6SubnetHostIter {
+    type Item = Ipv6Addr;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+        if self.current > self.end {
+            self.finished = true;
+            return None;
+        }
+        let addr = Ipv6Addr::from(self.current);
+        self.current = self.current.saturating_add(1);
+        Some(addr)
+    }
+}
+
 const DEFAULT_SUBNET_BATCH: usize = 32;
 
 #[derive(Clone, Copy)]
 struct HostStatus {
-    host: Ipv4Addr,
+    host: IpAddr,
     latency_us: Option<u128>,
 }
 
@@ -169,13 +302,13 @@ fn print_chunk_row(results: &[HostStatus], minimal: bool, attempt_idx: usize, at
     print_with_prefix(minimal, line);
 }
 
-fn tcp_probe_chunk(hosts: &[Ipv4Addr], port: u16, timeout_ms: u64) -> Vec<HostStatus> {
+fn tcp_probe_chunk(hosts: &[IpAddr], port: u16, timeout_ms: u64) -> Vec<HostStatus> {
     let mut handles = Vec::with_capacity(hosts.len());
     for &host in hosts {
         handles.push((
             host,
             thread::spawn(move || {
-                let latency_ms = tcp_connect_once(IpAddr::V4(host), port, timeout_ms);
+                let latency_ms = tcp_connect_once(host, port, timeout_ms);
                 if latency_ms >= 0.0 {
                     let micros = ((latency_ms as f64) * 1000.0).max(0.0) as u128;
                     HostStatus {
@@ -204,7 +337,7 @@ fn tcp_probe_chunk(hosts: &[Ipv4Addr], port: u16, timeout_ms: u64) -> Vec<HostSt
 }
 
 fn icmp_probe_chunk(
-    hosts: &[(Ipv4Addr, u16)],
+    hosts: &[(IpAddr, u16)],
     timeout: Duration,
     ttl: u8,
     ident: u16,
@@ -247,7 +380,7 @@ fn ensure_attempts(attempts: usize) -> usize {
 
 fn print_header(
     protocol: &str,
-    subnet: &Ipv4Subnet,
+    subnet_notation: String,
     host_count: u128,
     port: Option<u16>,
     attempts: usize,
@@ -255,7 +388,7 @@ fn print_header(
 ) {
     let mut message = format!(
         "Scanning {} ({} hosts) via {}",
-        subnet.notation().bright_blue(),
+        subnet_notation.bright_blue(),
         host_count,
         protocol
     );
@@ -299,7 +432,7 @@ pub fn perform_tcp_subnet_scan(
         return Ok(());
     }
 
-    let hosts: Vec<Ipv4Addr> = subnet.iter_hosts().collect();
+    let hosts: Vec<IpAddr> = subnet.iter_hosts().map(IpAddr::V4).collect();
     if hosts.is_empty() {
         print_with_prefix(
             minimal,
@@ -312,12 +445,19 @@ pub fn perform_tcp_subnet_scan(
     }
 
     let attempts = ensure_attempts(attempts_per_host);
-    print_header("TCP", subnet, host_count, Some(port), attempts, minimal);
+    print_header(
+        "TCP",
+        subnet.notation(),
+        host_count,
+        Some(port),
+        attempts,
+        minimal,
+    );
 
     let chunk_size = hosts.len().min(DEFAULT_SUBNET_BATCH);
     let mut times = VecDeque::new();
     let mut successes = 0usize;
-    let mut responsive_hosts: HashSet<Ipv4Addr> = HashSet::new();
+    let mut responsive_hosts: HashSet<IpAddr> = HashSet::new();
 
     for attempt_idx in 0..attempts {
         for chunk in hosts.chunks(chunk_size) {
@@ -341,8 +481,11 @@ pub fn perform_tcp_subnet_scan(
     let total_attempts = hosts.len() * attempts;
 
     if minimal {
-        let mut responsive_list: Vec<Ipv4Addr> = responsive_hosts.iter().cloned().collect();
-        responsive_list.sort();
+        let mut responsive_list: Vec<IpAddr> = responsive_hosts.iter().cloned().collect();
+        responsive_list.sort_by_key(|ip| match ip {
+            IpAddr::V4(v4) => (0, u32::from(*v4) as u128),
+            IpAddr::V6(v6) => (1, u128::from(*v6)),
+        });
         if !responsive_list.is_empty() {
             let entries = responsive_list
                 .iter()
@@ -379,7 +522,7 @@ pub fn perform_icmp_subnet_scan(
         return Ok(());
     }
 
-    let hosts: Vec<Ipv4Addr> = subnet.iter_hosts().collect();
+    let hosts: Vec<IpAddr> = subnet.iter_hosts().map(IpAddr::V4).collect();
     if hosts.is_empty() {
         print_with_prefix(
             minimal,
@@ -392,13 +535,20 @@ pub fn perform_icmp_subnet_scan(
     }
 
     let attempts = ensure_attempts(attempts_per_host);
-    print_header("ICMP", subnet, host_count, None, attempts, minimal);
+    print_header(
+        "ICMP",
+        subnet.notation(),
+        host_count,
+        None,
+        attempts,
+        minimal,
+    );
 
     let timeout = Duration::from_millis(timeout_ms);
     let chunk_size = hosts.len().min(DEFAULT_SUBNET_BATCH);
     let mut times = VecDeque::new();
     let mut successes = 0usize;
-    let mut responsive_hosts: HashSet<Ipv4Addr> = HashSet::new();
+    let mut responsive_hosts: HashSet<IpAddr> = HashSet::new();
     let mut seq: u16 = 1;
 
     for attempt_idx in 0..attempts {
@@ -430,8 +580,220 @@ pub fn perform_icmp_subnet_scan(
     let total_attempts = hosts.len() * attempts;
 
     if minimal {
-        let mut responsive_list: Vec<Ipv4Addr> = responsive_hosts.iter().cloned().collect();
-        responsive_list.sort();
+        let mut responsive_list: Vec<IpAddr> = responsive_hosts.iter().cloned().collect();
+        responsive_list.sort_by_key(|ip| match ip {
+            IpAddr::V4(v4) => (0, u32::from(*v4) as u128),
+            IpAddr::V6(v6) => (1, u128::from(*v6)),
+        });
+        if !responsive_list.is_empty() {
+            let entries = responsive_list
+                .iter()
+                .map(|ip| ip.to_string().green())
+                .collect::<Vec<_>>()
+                .join(", ");
+            print_with_prefix(minimal, format!("[{}]", entries));
+        }
+    }
+
+    print_host_summary(hosts.len(), responsive_hosts.len(), minimal);
+    print_statistics("ICMP subnet", total_attempts, successes, &times);
+    Ok(())
+}
+
+pub fn perform_tcp_ipv6_subnet_scan(
+    subnet: &Ipv6Subnet,
+    port: u16,
+    timeout_ms: u64,
+    attempts_per_host: usize,
+    minimal: bool,
+) -> Result<(), Box<dyn Error>> {
+    let host_count = subnet.host_count();
+    if host_count == 0 {
+        print_with_prefix(
+            minimal,
+            format!(
+                "{} has no usable host addresses",
+                subnet.notation().yellow()
+            ),
+        );
+        return Ok(());
+    }
+
+    if host_count == u128::MAX {
+        print_with_prefix(
+            minimal,
+            format!(
+                "{} has too many addresses to scan (max /112 supported)",
+                subnet.notation().yellow()
+            ),
+        );
+        return Ok(());
+    }
+
+    let hosts: Vec<IpAddr> = subnet.iter_hosts().map(IpAddr::V6).collect();
+    if hosts.is_empty() {
+        print_with_prefix(
+            minimal,
+            format!(
+                "{} has no usable host addresses",
+                subnet.notation().yellow()
+            ),
+        );
+        return Ok(());
+    }
+
+    let attempts = ensure_attempts(attempts_per_host);
+    print_header(
+        "TCP",
+        subnet.notation(),
+        host_count,
+        Some(port),
+        attempts,
+        minimal,
+    );
+
+    let chunk_size = hosts.len().min(DEFAULT_SUBNET_BATCH);
+    let mut times = VecDeque::new();
+    let mut successes = 0usize;
+    let mut responsive_hosts: HashSet<IpAddr> = HashSet::new();
+
+    for attempt_idx in 0..attempts {
+        for chunk in hosts.chunks(chunk_size) {
+            let results = tcp_probe_chunk(chunk, port, timeout_ms);
+            if !minimal {
+                print_chunk_row(&results, minimal, attempt_idx + 1, attempts);
+            }
+
+            for status in &results {
+                if let Some(latency) = status.latency_us {
+                    successes += 1;
+                    responsive_hosts.insert(status.host);
+                    times.push_back(latency);
+                } else {
+                    times.push_back(0);
+                }
+            }
+        }
+    }
+
+    let total_attempts = hosts.len() * attempts;
+
+    if minimal {
+        let mut responsive_list: Vec<IpAddr> = responsive_hosts.iter().cloned().collect();
+        responsive_list.sort_by_key(|ip| match ip {
+            IpAddr::V4(v4) => (0, u32::from(*v4) as u128),
+            IpAddr::V6(v6) => (1, u128::from(*v6)),
+        });
+        if !responsive_list.is_empty() {
+            let entries = responsive_list
+                .iter()
+                .map(|ip| ip.to_string().green())
+                .collect::<Vec<_>>()
+                .join(", ");
+            print_with_prefix(minimal, format!("[{}]", entries));
+        }
+    }
+
+    print_host_summary(hosts.len(), responsive_hosts.len(), minimal);
+    print_statistics("TCP subnet", total_attempts, successes, &times);
+    Ok(())
+}
+
+pub fn perform_icmp_ipv6_subnet_scan(
+    subnet: &Ipv6Subnet,
+    timeout_ms: u64,
+    ttl: u8,
+    ident: u16,
+    attempts_per_host: usize,
+    payload: &[u8; 24],
+    minimal: bool,
+) -> Result<(), Box<dyn Error>> {
+    let host_count = subnet.host_count();
+    if host_count == 0 {
+        print_with_prefix(
+            minimal,
+            format!(
+                "{} has no usable host addresses",
+                subnet.notation().yellow()
+            ),
+        );
+        return Ok(());
+    }
+
+    if host_count == u128::MAX {
+        print_with_prefix(
+            minimal,
+            format!(
+                "{} has too many addresses to scan (max /112 supported)",
+                subnet.notation().yellow()
+            ),
+        );
+        return Ok(());
+    }
+
+    let hosts: Vec<IpAddr> = subnet.iter_hosts().map(IpAddr::V6).collect();
+    if hosts.is_empty() {
+        print_with_prefix(
+            minimal,
+            format!(
+                "{} has no usable host addresses",
+                subnet.notation().yellow()
+            ),
+        );
+        return Ok(());
+    }
+
+    let attempts = ensure_attempts(attempts_per_host);
+    print_header(
+        "ICMP",
+        subnet.notation(),
+        host_count,
+        None,
+        attempts,
+        minimal,
+    );
+
+    let timeout = Duration::from_millis(timeout_ms);
+    let chunk_size = hosts.len().min(DEFAULT_SUBNET_BATCH);
+    let mut times = VecDeque::new();
+    let mut successes = 0usize;
+    let mut responsive_hosts: HashSet<IpAddr> = HashSet::new();
+    let mut seq: u16 = 1;
+
+    for attempt_idx in 0..attempts {
+        for chunk in hosts.chunks(chunk_size) {
+            let mut batch = Vec::with_capacity(chunk.len());
+            for &host in chunk {
+                let current_seq = seq;
+                seq = seq.wrapping_add(1);
+                batch.push((host, current_seq));
+            }
+
+            let results = icmp_probe_chunk(&batch, timeout, ttl, ident, payload);
+            if !minimal {
+                print_chunk_row(&results, minimal, attempt_idx + 1, attempts);
+            }
+
+            for status in &results {
+                if let Some(latency) = status.latency_us {
+                    successes += 1;
+                    responsive_hosts.insert(status.host);
+                    times.push_back(latency);
+                } else {
+                    times.push_back(0);
+                }
+            }
+        }
+    }
+
+    let total_attempts = hosts.len() * attempts;
+
+    if minimal {
+        let mut responsive_list: Vec<IpAddr> = responsive_hosts.iter().cloned().collect();
+        responsive_list.sort_by_key(|ip| match ip {
+            IpAddr::V4(v4) => (0, u32::from(*v4) as u128),
+            IpAddr::V6(v6) => (1, u128::from(*v6)),
+        });
         if !responsive_list.is_empty() {
             let entries = responsive_list
                 .iter()

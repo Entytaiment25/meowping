@@ -15,7 +15,10 @@ use colors::Colorize;
 use http_check::perform_http_check;
 use icmp::{DEFAULT_ICMP_PAYLOAD, DEFAULT_IDENT, DEFAULT_TTL, perform_icmp};
 use parser::{Extracted, Parser, parse_multiple_destinations};
-use subnet::{Ipv4Subnet, perform_icmp_subnet_scan, perform_tcp_subnet_scan};
+use subnet::{
+    Ipv4Subnet, Ipv6Subnet, perform_icmp_ipv6_subnet_scan, perform_icmp_subnet_scan,
+    perform_tcp_ipv6_subnet_scan, perform_tcp_subnet_scan,
+};
 use tcp::{perform_tcp, perform_tcp_multi_scan};
 
 #[cfg(target_os = "windows")]
@@ -77,6 +80,30 @@ fn handle_subnet_scan(
 }
 
 #[inline(never)]
+fn handle_ipv6_subnet_scan(
+    subnet: &Ipv6Subnet,
+    port: Option<u16>,
+    timeout: u64,
+    per_host_attempts: usize,
+    minimal: bool,
+) -> Result<(), Box<dyn Error>> {
+    if let Some(p) = port {
+        perform_tcp_ipv6_subnet_scan(subnet, p, timeout, per_host_attempts, minimal)?;
+    } else {
+        perform_icmp_ipv6_subnet_scan(
+            subnet,
+            timeout,
+            DEFAULT_TTL,
+            DEFAULT_IDENT,
+            per_host_attempts,
+            &DEFAULT_ICMP_PAYLOAD,
+            minimal,
+        )?;
+    }
+    Ok(())
+}
+
+#[inline(never)]
 fn resolve_destination(dest: &str, minimal: bool) -> Option<String> {
     if dest.parse::<IpAddr>().is_ok() {
         Some(dest.to_string())
@@ -101,7 +128,11 @@ fn handle_multi_icmp(destinations: &[String], timeout: u64, count: usize, minima
     for dest in destinations {
         if let Some(destination) = resolve_destination(dest, minimal) {
             if !minimal {
-                println!("\n[MEOWPING] Scanning host: {}", destination.green());
+                println!(
+                    "\n{} Scanning host: {}",
+                    "[MEOWPING]".magenta(),
+                    destination.green()
+                );
             }
             let _ = perform_icmp(
                 &destination,
@@ -176,6 +207,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     } else {
         None
     };
+    let ipv6_subnet_target = if !is_multi && subnet_target.is_none() {
+        Ipv6Subnet::from_str(&destination_input).ok()
+    } else {
+        None
+    };
 
     let timeout = args
         .opt_value_from_str(["-t", "--timeout"])
@@ -187,14 +223,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         Ok(None) => (65535, false),
         Err(_) => return Err("Failed to parse count argument".into()),
     };
-    let per_host_attempts: usize = if subnet_target.is_some() && !count_from_cli {
-        1
-    } else {
-        count as usize
-    };
+    let per_host_attempts: usize =
+        if (subnet_target.is_some() || ipv6_subnet_target.is_some()) && !count_from_cli {
+            1
+        } else {
+            count as usize
+        };
 
     if http_check {
-        if subnet_target.is_some() {
+        if subnet_target.is_some() || ipv6_subnet_target.is_some() {
             return Err("HTTP checking is not supported for subnet targets".into());
         }
         return handle_http_check(
@@ -217,6 +254,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     if let Some(subnet) = subnet_target {
         return handle_subnet_scan(&subnet, port, timeout, per_host_attempts, minimal);
+    }
+
+    if let Some(ipv6_subnet) = ipv6_subnet_target {
+        return handle_ipv6_subnet_scan(&ipv6_subnet, port, timeout, per_host_attempts, minimal);
     }
 
     if is_multi {

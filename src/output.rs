@@ -57,8 +57,16 @@ pub fn color_time(time_ms: f64) -> String {
 
 pub fn print_help() {
     let name = env!("CARGO_PKG_NAME");
-    println!("Usage: {} <destination> [options]\n", name);
-    println!("Optional Options:");
+    println!(
+        "{} - A flexible ping utility Tool written in Rust, that is focused on being size efficient and fast.",
+        name
+    );
+    println!(
+        "\n{}: {} <destination> [options]",
+        "Usage".bright_blue(),
+        name
+    );
+    println!("\n{}:", "Options".bright_blue());
     println!("    -h, --help                Prints the Help Menu");
     println!("    -p, --port <port>         Set the port number (default: ICMP, with: TCP)");
     println!(
@@ -70,6 +78,41 @@ pub fn print_help() {
     println!("    -m, --minimal             Changes the Prints to be more Minimal");
     println!("    -s, --http              Check if the destination URL is online via HTTP/S");
     println!("    -a, --no-asn            Disable ASN/organization lookups (use static data)");
+
+    println!("\n{}", "Examples:".bright_blue());
+
+    println!("\n  {}:", "Single Host Ping".yellow());
+    println!("    {} google.com", name);
+    println!("    {} 8.8.8.8 -c 10", name);
+    println!("    {} 2606:4700:4700::1111", name);
+
+    println!("\n  {}:", "TCP Port Check".yellow());
+    println!("    {} example.com -p 443", name);
+    println!("    {} 192.168.1.1 -p 22 -t 2000", name);
+
+    println!("\n  {}:", "HTTP/HTTPS Check".yellow());
+    println!("    {} https://example.com -s", name);
+    println!("    {} example.com -s -c 5", name);
+
+    println!("\n  {}:", "Multi-Ping (Multiple Destinations)".yellow());
+    println!("    {} google.com,cloudflare.com,1.1.1.1 -c 2", name);
+    println!("    {} \"8.8.8.8,1.1.1.1,9.9.9.9\" -c 10", name);
+
+    println!("\n  {}:", "Subnet Scanning".yellow());
+    println!("    {} 192.168.1.0/24", name);
+    println!("    {} 10.0.0.0/28 -c 3", name);
+    println!("    {} 192.168.1.0/24 -p 80", name);
+    println!("    {} 2001:db8::/120", name);
+    println!("    {} fe80::/112 -p 22", name);
+
+    println!("\n{}:", "IPv6 Support".bright_blue());
+    println!("    MeowPing supports IPv6 addresses for all connection types (ICMP, TCP, HTTP)");
+    println!("    IPv6 subnet scanning is supported up to /112 prefix length");
+
+    println!("\n{}:", "Notes".bright_blue());
+    println!("    • Subnet scans default to 1 attempt per host unless -c is specified");
+    println!("    • Multi-ping supports mixing hostnames and IP addresses");
+    println!("    • ICMP may require elevated privileges on some systems");
 }
 
 pub fn print_welcome() {
