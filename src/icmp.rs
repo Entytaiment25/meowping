@@ -150,12 +150,6 @@ mod platform {
         packet[7] = (seq & 0xff) as u8;
         packet[8..8 + payload.len()].copy_from_slice(payload);
 
-        if !is_linux {
-            let csum = icmp_checksum(&packet);
-            packet[2] = (csum >> 8) as u8;
-            packet[3] = (csum & 0xff) as u8;
-        }
-
         let mut addr: libc::sockaddr_in6 = unsafe { mem::zeroed() };
         addr.sin6_family = libc::AF_INET6 as libc::sa_family_t;
         addr.sin6_port = 0;
@@ -212,7 +206,7 @@ mod platform {
         let r_id = u16::from_be_bytes([view[4], view[5]]);
         let r_seq = u16::from_be_bytes([view[6], view[7]]);
 
-        if icmp_type != 129 || icmp_code != 0 || !is_linux && (r_id != identifier || r_seq != seq) {
+        if icmp_type != 129 || icmp_code != 0 || (!is_linux && (r_id != identifier || r_seq != seq)) {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
                 "Unexpected ICMPv6 reply",
