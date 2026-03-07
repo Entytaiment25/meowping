@@ -198,9 +198,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     let http_check = args.contains(["-s", "--http"]);
     let no_asn = args.contains(["-a", "--no-asn"]);
 
-    let destination_input = args
-        .free_from_str::<String>()
-        .map_err(|_| "Destination argument missing")?;
+    let destination_input = match args.free_from_str::<String>() {
+        Ok(dest) => dest,
+        Err(_) => {
+            output::print_help();
+            #[cfg(target_os = "windows")]
+            {
+                println!("\nPress Enter to exit...");
+                let _ = std::io::stdin().read_line(&mut String::new());
+            }
+            return Err("Destination argument missing".into());
+        }
+    };
 
     let mut destinations = parse_multiple_destinations(&destination_input);
     if destinations.len() > 1 {
