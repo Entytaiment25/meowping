@@ -12,6 +12,7 @@ fi
 # On macOS and Linux, ICMP requires sudo or capabilities
 USE_SUDO_ICMP=""
 HAVE_ICMP_PERMS=false
+HAVE_EXT_ICMP=false
 if [[ "$(uname)" == "Darwin" || "$(uname)" == "Linux" ]]; then
     # Check if we have raw socket capabilities or can use sudo
     if timeout 2 $MEOWPING_PATH 127.0.0.1 -c 1 -m >/dev/null 2>&1; then
@@ -22,6 +23,20 @@ if [[ "$(uname)" == "Darwin" || "$(uname)" == "Linux" ]]; then
         USE_SUDO_ICMP="sudo"
         if timeout 2 sudo $MEOWPING_PATH 127.0.0.1 -c 1 -m >/dev/null 2>&1; then
             HAVE_ICMP_PERMS=true
+        fi
+    fi
+
+    # Check if outbound ICMP to external hosts actually works (may be blocked on CI runners)
+    if [[ "$HAVE_ICMP_PERMS" == "true" ]]; then
+        if [[ -n "$USE_SUDO_ICMP" ]]; then
+            EXT_ICMP_TEST=$($USE_SUDO_ICMP $MEOWPING_PATH 1.1.1.1 -c 1 -m 2>&1 || true)
+        else
+            EXT_ICMP_TEST=$($MEOWPING_PATH 1.1.1.1 -c 1 -m 2>&1 || true)
+        fi
+        if echo "$EXT_ICMP_TEST" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Reply from"; then
+            HAVE_EXT_ICMP=true
+        else
+            echo "Note: Outbound ICMP to external hosts appears blocked, skipping external ICMP tests"
         fi
     fi
 fi
@@ -43,7 +58,7 @@ if ! echo "$OUTPUT2" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "AS13335 Cloudflare, 
     exit 1
 fi
 
-if [[ "$HAVE_ICMP_PERMS" == "true" ]]; then
+if [[ "$HAVE_EXT_ICMP" == "true" ]]; then
     if [[ -n "$USE_SUDO_ICMP" ]]; then
         OUTPUT3=$($USE_SUDO_ICMP $MEOWPING_PATH https://cloudflare.com -c 1 -m)
     else
@@ -56,7 +71,7 @@ if [[ "$HAVE_ICMP_PERMS" == "true" ]]; then
         exit 1
     fi
 else
-    echo "Skipping ICMP test for cloudflare.com (insufficient permissions)"
+    echo "Skipping ICMP test for cloudflare.com (outbound ICMP unavailable)"
 fi
 
 OUTPUT4=$($MEOWPING -s https://mock.httpstatus.io/200 -c 1 -m)
@@ -106,7 +121,7 @@ if ! echo "$OUTPUT7" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Hosts responsive: 2/
 fi
 
 # Test multi-host ICMP ping in minimal mode
-if [[ "$HAVE_ICMP_PERMS" == "true" ]]; then
+if [[ "$HAVE_EXT_ICMP" == "true" ]]; then
     if [[ -n "$USE_SUDO_ICMP" ]]; then
         OUTPUT8=$($USE_SUDO_ICMP $MEOWPING_PATH 1.1.1.1,8.8.8.8 -c 1 -m)
     else
@@ -140,7 +155,7 @@ if [[ "$HAVE_ICMP_PERMS" == "true" ]]; then
         exit 1
     fi
 else
-    echo "Skipping multi-host ICMP tests (insufficient permissions)"
+    echo "Skipping multi-host ICMP tests (outbound ICMP unavailable)"
 fi
 
 # ============================================================================
@@ -256,7 +271,7 @@ if ! echo "$OUTPUT_IPV6_6" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "::1"; then
 fi
 
 # Test mixed IPv4/IPv6 multi-host ICMP
-if [[ "$HAVE_ICMP_PERMS" == "true" ]]; then
+if [[ "$HAVE_EXT_ICMP" == "true" ]]; then
     if [[ -n "$USE_SUDO_ICMP" ]]; then
         OUTPUT_IPV6_7=$($USE_SUDO_ICMP $MEOWPING_PATH 8.8.8.8,::1 -c 1 -m)
     else
@@ -270,7 +285,7 @@ if [[ "$HAVE_ICMP_PERMS" == "true" ]]; then
         exit 1
     fi
 else
-    echo "Skipping mixed IPv4/IPv6 ICMP test (insufficient permissions)"
+    echo "Skipping mixed IPv4/IPv6 ICMP test (outbound ICMP unavailable)"
 fi
 
 # Test IPv6 help text
