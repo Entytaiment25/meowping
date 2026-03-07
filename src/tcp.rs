@@ -23,7 +23,11 @@ pub fn resolve_ip(destination: &str, port: u16) -> Result<SocketAddr, Box<dyn Er
     if let Ok(ip) = destination.parse::<std::net::IpAddr>() {
         return Ok(SocketAddr::new(ip, port));
     }
-    let with_port = format!("{}:{}", destination, port);
+    let with_port = if destination.contains(':') {
+        format!("[{}]:{}", destination, port)
+    } else {
+        format!("{}:{}", destination, port)
+    };
     Ok(with_port.to_socket_addrs()?.next().ok_or_else(|| {
         Box::new(MeowpingError(
             "Unable to find IP address from domain.".to_string(),

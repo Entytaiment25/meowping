@@ -27,7 +27,18 @@ impl Parser {
         let mut host = host_port;
         let mut port = None;
 
-        if let Some(colon_pos) = host_port.find(':') {
+        if host_port.starts_with('[') {
+            // IPv6 bracketed notation: [::1]:port or [::1]
+            if let Some(bracket_end) = host_port.find(']') {
+                host = &host_port[1..bracket_end];
+                let after = &host_port[bracket_end + 1..];
+                if let Some(port_str) = after.strip_prefix(':') {
+                    port = port_str.parse().ok();
+                }
+            } else {
+                return Err("Invalid IPv6 address format");
+            }
+        } else if let Some(colon_pos) = host_port.find(':') {
             host = &host_port[..colon_pos];
             port = host_port[colon_pos + 1..].parse().ok();
         }
@@ -58,7 +69,12 @@ impl Parser {
 
     fn is_resolvable_hostname(hostname: &str) -> bool {
         use std::net::ToSocketAddrs;
-        format!("{}:80", hostname)
+        let socket_str = if hostname.contains(':') {
+            format!("[{}]:80", hostname)
+        } else {
+            format!("{}:80", hostname)
+        };
+        socket_str
             .to_socket_addrs()
             .map(|mut addrs| addrs.next().is_some())
             .unwrap_or(false)

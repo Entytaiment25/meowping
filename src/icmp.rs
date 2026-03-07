@@ -122,13 +122,14 @@ mod platform {
         ident: u16,
         payload: &[u8; 24],
     ) -> io::Result<(usize, Duration)> {
-        let is_linux = cfg!(target_os = "linux");
-        let sock_ty = if is_linux {
-            libc::SOCK_DGRAM
+        let fd_raw =
+            unsafe { libc::socket(libc::AF_INET6, libc::SOCK_DGRAM, libc::IPPROTO_ICMPV6) };
+        let is_dgram = fd_raw >= 0;
+        let fd_raw = if fd_raw < 0 {
+            unsafe { libc::socket(libc::AF_INET6, libc::SOCK_RAW, libc::IPPROTO_ICMPV6) }
         } else {
-            libc::SOCK_RAW
+            fd_raw
         };
-        let fd_raw = unsafe { libc::socket(libc::AF_INET6, sock_ty, libc::IPPROTO_ICMPV6) };
         if fd_raw < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -206,7 +207,7 @@ mod platform {
         let r_id = u16::from_be_bytes([view[4], view[5]]);
         let r_seq = u16::from_be_bytes([view[6], view[7]]);
 
-        if icmp_type != 129 || icmp_code != 0 || (!is_linux && (r_id != identifier || r_seq != seq)) {
+        if icmp_type != 129 || icmp_code != 0 || (!is_dgram && (r_id != identifier || r_seq != seq)) {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
                 "Unexpected ICMPv6 reply",
@@ -389,6 +390,94 @@ mod platform {
             }
         }
     }
+
+    pub fn ping_once_ipv6(
+        ip: Ipv6Addr,
+        _seq: u16,
+        timeout: Duration,
+        _ttl: u8,
+        _ident: u16,
+        payload: &[u8; 24],
+    ) -> io::Result<(usize, Duration)> {
+        #[repr(C)]
+        struct SockAddrIn6 {
+            sin6_family: u16,
+            sin6_port: u16,
+            sin6_flowinfo: u32,
+            sin6_addr: [u8; 16],
+            sin6_scope_id: u32,
+        }
+
+        #[link(name = "iphlpapi")]
+        unsafe extern "system" {
+            fn Icmp6CreateFile() -> isize;
+            fn Icmp6SendEcho2(
+                icmphandle: isize,
+                event: isize,
+                apcroutine: usize,
+                apccontext: usize,
+                sourceaddress: *const SockAddrIn6,
+                destinationaddress: *const SockAddrIn6,
+                requestdata: *const u8,
+                requestsize: u16,
+                requestoptions: usize,
+                replybuffer: *mut u8,
+                replysize: u32,
+                timeout: u32,
+            ) -> u32;
+        }
+
+        unsafe {
+            let handle = Icmp6CreateFile();
+            if handle == INVALID_HANDLE_VALUE as isize {
+                return Err(io::Error::last_os_error());
+            }
+            let handle = HandleGuard(handle);
+
+            let src_addr = SockAddrIn6 {
+                sin6_family: 23, // AF_INET6
+                sin6_port: 0,
+                sin6_flowinfo: 0,
+                sin6_addr: [0u8; 16],
+                sin6_scope_id: 0,
+            };
+
+            let dst_addr = SockAddrIn6 {
+                sin6_family: 23,
+                sin6_port: 0,
+                sin6_flowinfo: 0,
+                sin6_addr: ip.octets(),
+                sin6_scope_id: 0,
+            };
+
+            // ICMPV6_ECHO_REPLY_LH (36 bytes) + payload + 8 bytes for ICMP error message + IO_STATUS_BLOCK (16 bytes on 64-bit)
+            let reply_size = 36 + payload.len() + 8 + 32;
+            let mut reply_buf = vec![0u8; reply_size];
+
+            let start = Instant::now();
+            let num = Icmp6SendEcho2(
+                handle.0,
+                0, // event = NULL
+                0, // apcroutine = NULL
+                0, // apccontext = NULL
+                &src_addr,
+                &dst_addr,
+                payload.as_ptr(),
+                payload.len() as u16,
+                0, // requestoptions = NULL
+                reply_buf.as_mut_ptr(),
+                reply_size as u32,
+                timeout.as_millis() as u32,
+            );
+            let rtt = start.elapsed();
+
+            if num > 0 {
+                Ok((payload.len(), rtt))
+            } else {
+                Err(io::Error::last_os_error())
+            }
+        }
+    }
 }
 
 pub fn ping_host_once(
@@ -401,19 +490,7 @@ pub fn ping_host_once(
 ) -> std::io::Result<(usize, Duration)> {
     match ip {
         IpAddr::V4(ipv4) => platform::ping_once_ipv4(ipv4, seq, timeout, ttl, ident, payload),
-        IpAddr::V6(ipv6) => {
-            #[cfg(unix)]
-            {
-                platform::ping_once_ipv6(ipv6, seq, timeout, ttl, ident, payload)
-            }
-            #[cfg(not(unix))]
-            {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    "IPv6 is not supported on this platform",
-                ))
-            }
-        }
+        IpAddr::V6(ipv6) => platform::ping_once_ipv6(ipv6, seq, timeout, ttl, ident, payload),
     }
 }
 

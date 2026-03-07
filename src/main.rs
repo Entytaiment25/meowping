@@ -105,8 +105,15 @@ fn handle_ipv6_subnet_scan(
 
 #[inline(never)]
 fn resolve_destination(dest: &str, minimal: bool) -> Option<String> {
-    if dest.parse::<IpAddr>().is_ok() {
-        Some(dest.to_string())
+    // Handle bracketed IPv6 addresses like [::1]
+    let clean = if dest.starts_with('[') && dest.ends_with(']') {
+        &dest[1..dest.len() - 1]
+    } else {
+        dest
+    };
+
+    if clean.parse::<IpAddr>().is_ok() {
+        Some(clean.to_string())
     } else {
         match Parser::extract_url(dest) {
             Extracted::Error => {
