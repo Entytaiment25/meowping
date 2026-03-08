@@ -207,7 +207,8 @@ mod platform {
         let r_id = u16::from_be_bytes([view[4], view[5]]);
         let r_seq = u16::from_be_bytes([view[6], view[7]]);
 
-        if icmp_type != 129 || icmp_code != 0 || (!is_dgram && (r_id != identifier || r_seq != seq)) {
+        if icmp_type != 129 || icmp_code != 0 || (!is_dgram && (r_id != identifier || r_seq != seq))
+        {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
                 "Unexpected ICMPv6 reply",
