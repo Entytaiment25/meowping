@@ -1,9 +1,9 @@
 [package]
 name = "meowping"
-version = "2.0.1"
+version = "2.0.2"
 authors = ["Entytaiment25"]
 edition = "2024"
-rust-version = "1.89.0"
+rust-version = "1.94.0"
 description = " A flexible ping utility Tool written in Rust, that is focused on being size efficient and fast."
 repository = "https://github.com/entytaiment25/meowping"
 license = "MIT"
@@ -38,7 +38,7 @@ strip = "symbols"
 native-tls = { version = "0.2.18", features = ["vendored"] }
 
 [target.'cfg(unix)'.dependencies]
-libc = { version = "0.2.182" }
+libc = { version = "0.2.183" }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
