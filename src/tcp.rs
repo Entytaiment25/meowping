@@ -28,11 +28,17 @@ pub fn resolve_ip(destination: &str, port: u16) -> Result<SocketAddr, Box<dyn Er
     } else {
         format!("{}:{}", destination, port)
     };
-    Ok(with_port.to_socket_addrs()?.next().ok_or_else(|| {
-        Box::new(MeowpingError(
-            "Unable to find IP address from domain.".to_string(),
-        ))
-    })?)
+    let addrs: Vec<SocketAddr> = with_port.to_socket_addrs()?.collect();
+    let chosen = addrs
+        .iter()
+        .find(|a| a.is_ipv4())
+        .or_else(|| addrs.first())
+        .ok_or_else(|| {
+            Box::new(MeowpingError(
+                "Unable to find IP address from domain.".to_string(),
+            ))
+        })?;
+    Ok(*chosen)
 }
 
 fn is_private_ip(ip_addr: &std::net::IpAddr) -> bool {
