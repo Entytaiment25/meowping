@@ -17,7 +17,10 @@ const DEFAULT_HEADERS: &[&str] = &[
 fn build_request(host: &str, path: &str, extra_headers: &[String]) -> String {
     let mut req = format!("GET {} HTTP/1.1\r\nHost: {}\r\n", path, host);
     let headers: &[_] = if extra_headers.is_empty() {
-        &DEFAULT_HEADERS.iter().map(|s| s.to_string()).collect::<Vec<_>>()
+        &DEFAULT_HEADERS
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
     } else {
         extra_headers
     };
@@ -104,7 +107,11 @@ fn get_https_status(
     parse_http_status(&response)
 }
 
-pub fn get_status(url: &str, timeout: u64, headers: &[String]) -> Result<u16, Box<dyn std::error::Error>> {
+pub fn get_status(
+    url: &str,
+    timeout: u64,
+    headers: &[String],
+) -> Result<u16, Box<dyn std::error::Error>> {
     let parsed_url = Parser::parse(url)?;
     let host = &parsed_url.host;
     let path = &parsed_url.path;

@@ -10,7 +10,10 @@ pub struct Config {
 }
 
 #[derive(PartialEq)]
-enum Section { Settings, Headers }
+enum Section {
+    Settings,
+    Headers,
+}
 
 impl Config {
     pub fn default_path() -> PathBuf {
@@ -62,19 +65,30 @@ impl Config {
             match section {
                 Section::Settings => {
                     let (key, value) = line.split_once('=').ok_or_else(|| {
-                        format!("Config line {}: expected 'key = value', got: {}", i + 1, line)
+                        format!(
+                            "Config line {}: expected 'key = value', got: {}",
+                            i + 1,
+                            line
+                        )
                     })?;
                     match key.trim() {
                         "minimal" => minimal = Some(parse_bool(value.trim(), i + 1)?),
-                        "no_asn"  => no_asn  = Some(parse_bool(value.trim(), i + 1)?),
-                        unknown   => return Err(format!("Config line {}: unknown setting '{}'", i + 1, unknown)),
+                        "no_asn" => no_asn = Some(parse_bool(value.trim(), i + 1)?),
+                        unknown => {
+                            return Err(format!(
+                                "Config line {}: unknown setting '{}'",
+                                i + 1,
+                                unknown
+                            ));
+                        }
                     }
                 }
                 Section::Headers => {
                     if !line.contains(':') {
                         return Err(format!(
                             "Config line {}: expected 'Header-Name: value', got: {}",
-                            i + 1, line
+                            i + 1,
+                            line
                         ));
                     }
                     http_headers.push(line.to_string());
@@ -82,14 +96,21 @@ impl Config {
             }
         }
 
-        Ok(Config { minimal, no_asn, http_headers })
+        Ok(Config {
+            minimal,
+            no_asn,
+            http_headers,
+        })
     }
 }
 
 fn parse_bool(s: &str, line: usize) -> Result<bool, String> {
     match s {
-        "true"  | "1" | "yes" => Ok(true),
-        "false" | "0" | "no"  => Ok(false),
-        _ => Err(format!("Config line {}: expected true/false, got: {}", line, s)),
+        "true" | "1" | "yes" => Ok(true),
+        "false" | "0" | "no" => Ok(false),
+        _ => Err(format!(
+            "Config line {}: expected true/false, got: {}",
+            line, s
+        )),
     }
 }

@@ -214,11 +214,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     let cfg = cfg.as_ref();
 
-    let minimal = args.contains(["-m", "--minimal"])
-        || cfg.and_then(|c| c.minimal).unwrap_or(false);
+    let minimal =
+        args.contains(["-m", "--minimal"]) || cfg.and_then(|c| c.minimal).unwrap_or(false);
     let http_check = args.contains(["-s", "--http"]);
-    let no_asn = args.contains(["-a", "--no-asn"])
-        || cfg.and_then(|c| c.no_asn).unwrap_or(false);
+    let no_asn = args.contains(["-a", "--no-asn"]) || cfg.and_then(|c| c.no_asn).unwrap_or(false);
 
     let destination_input = match args.free_from_str::<String>() {
         Ok(dest) => dest,

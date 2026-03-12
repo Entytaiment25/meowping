@@ -26,7 +26,12 @@ pub fn perform_http_check(
     Ok(())
 }
 
-fn check_http_status(url: &str, minimal: bool, timeout: u64, headers: &[String]) -> Result<String, Box<dyn Error>> {
+fn check_http_status(
+    url: &str,
+    minimal: bool,
+    timeout: u64,
+    headers: &[String],
+) -> Result<String, Box<dyn Error>> {
     match https::get_status(url, timeout, headers) {
         Ok(status) => {
             let (status_text, is_online) = match status {
