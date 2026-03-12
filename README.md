@@ -1,5 +1,7 @@
 # MeowPing
 
+> **Mirror:** A read-only mirror of this repository is available at [codeberg.org/enty/meowping](https://codeberg.org/enty/meowping).
+
 MeowPing is a command-line utility for testing network connectivity using ICMP echo requests or TCP connections. It provides similar functionality to traditional ping utilities but with a touch of whimsy and color. MeowPing supports both domain names and IP addresses, allowing users to check the availability and responsiveness of network hosts. Don't forget to leave a ⭐ :D
 
 ## Features
