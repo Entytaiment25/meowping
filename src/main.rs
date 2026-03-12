@@ -2,6 +2,7 @@ use std::{error::Error, net::IpAddr};
 
 mod cli;
 mod colors;
+mod config;
 mod http_check;
 mod https;
 mod icmp;
@@ -32,6 +33,7 @@ fn handle_http_check(
     count: usize,
     minimal: bool,
     is_multi: bool,
+    headers: &[String],
 ) -> Result<(), Box<dyn Error>> {
     if is_multi {
         for url in destinations {
@@ -40,7 +42,7 @@ fn handle_http_check(
             } else {
                 url.clone()
             };
-            let _ = perform_http_check(&url, timeout, count, minimal);
+            let _ = perform_http_check(&url, timeout, count, minimal, headers);
         }
     } else {
         let url = if !destination_input.starts_with("http://")
@@ -50,7 +52,7 @@ fn handle_http_check(
         } else {
             destination_input.to_string()
         };
-        perform_http_check(&url, timeout, count, minimal)?;
+        perform_http_check(&url, timeout, count, minimal, headers)?;
     }
     Ok(())
 }
@@ -194,9 +196,29 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    let minimal = args.contains(["-m", "--minimal"]);
+    // Load config file if --config flag is present
+    let cfg = match args.opt_flag_with_optional_value(["-C", "--config"]) {
+        Some(Some(path)) => {
+            let p = std::path::PathBuf::from(&path);
+            Some(config::Config::load(&p).map_err(|e| -> Box<dyn Error> { e.into() })?)
+        }
+        Some(None) => {
+            let p = config::Config::default_path();
+            if p.exists() {
+                Some(config::Config::load(&p).map_err(|e| -> Box<dyn Error> { e.into() })?)
+            } else {
+                None
+            }
+        }
+        None => None,
+    };
+    let cfg = cfg.as_ref();
+
+    let minimal = args.contains(["-m", "--minimal"])
+        || cfg.and_then(|c| c.minimal).unwrap_or(false);
     let http_check = args.contains(["-s", "--http"]);
-    let no_asn = args.contains(["-a", "--no-asn"]);
+    let no_asn = args.contains(["-a", "--no-asn"])
+        || cfg.and_then(|c| c.no_asn).unwrap_or(false);
 
     let destination_input = match args.free_from_str::<String>() {
         Ok(dest) => dest,
@@ -250,6 +272,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         if subnet_target.is_some() || ipv6_subnet_target.is_some() {
             return Err("HTTP checking is not supported for subnet targets".into());
         }
+        let http_headers = cfg.map(|c| c.http_headers.as_slice()).unwrap_or(&[]);
         return handle_http_check(
             &destinations,
             &destination_input,
@@ -257,6 +280,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             count as usize,
             minimal,
             is_multi,
+            http_headers,
         );
     }
 

@@ -5,16 +5,28 @@ use std::net::TcpStream;
 use std::net::ToSocketAddrs;
 use std::time::Duration;
 
-fn build_request(host: &str, path: &str) -> String {
-    format!(
-        "GET {} HTTP/1.1\r\n\
-        Host: {}\r\n\
-        User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36\r\n\
-        Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n\
-        Accept-Language: en-US,en;q=0.9\r\n\
-        Connection: close\r\n\r\n",
-        path, host
-    )
+const DEFAULT_HEADERS: &[&str] = &[
+    "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+    "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language: en-US,en;q=0.9",
+];
+
+/// Builds an HTTP/1.1 GET request. `Host` and `Connection: close` are always
+/// added by this function. If `extra_headers` is empty the built-in defaults
+/// are used; otherwise `extra_headers` replace them entirely.
+fn build_request(host: &str, path: &str, extra_headers: &[String]) -> String {
+    let mut req = format!("GET {} HTTP/1.1\r\nHost: {}\r\n", path, host);
+    let headers: &[_] = if extra_headers.is_empty() {
+        &DEFAULT_HEADERS.iter().map(|s| s.to_string()).collect::<Vec<_>>()
+    } else {
+        extra_headers
+    };
+    for h in headers {
+        req.push_str(h);
+        req.push_str("\r\n");
+    }
+    req.push_str("Connection: close\r\n\r\n");
+    req
 }
 
 fn parse_http_status(response: &[u8]) -> Result<u16, Box<dyn std::error::Error>> {
@@ -67,9 +79,10 @@ fn get_http_status(
     port: u16,
     path: &str,
     timeout: u64,
+    headers: &[String],
 ) -> Result<u16, Box<dyn std::error::Error>> {
     let mut stream = connect_tcp(host, port, timeout)?;
-    let request = build_request(host, path);
+    let request = build_request(host, path, headers);
     stream.write_all(request.as_bytes())?;
     let response = read_response(&mut stream)?;
     parse_http_status(&response)
@@ -80,17 +93,18 @@ fn get_https_status(
     port: u16,
     path: &str,
     timeout: u64,
+    headers: &[String],
 ) -> Result<u16, Box<dyn std::error::Error>> {
     let stream = connect_tcp(host, port, timeout)?;
     let connector = TlsConnector::new()?;
     let mut ssl_stream = connector.connect(host, stream)?;
-    let request = build_request(host, path);
+    let request = build_request(host, path, headers);
     ssl_stream.write_all(request.as_bytes())?;
     let response = read_response(&mut ssl_stream)?;
     parse_http_status(&response)
 }
 
-pub fn get_status(url: &str, timeout: u64) -> Result<u16, Box<dyn std::error::Error>> {
+pub fn get_status(url: &str, timeout: u64, headers: &[String]) -> Result<u16, Box<dyn std::error::Error>> {
     let parsed_url = Parser::parse(url)?;
     let host = &parsed_url.host;
     let path = &parsed_url.path;
@@ -102,10 +116,10 @@ pub fn get_status(url: &str, timeout: u64) -> Result<u16, Box<dyn std::error::Er
             );
         }
         let port = parsed_url.port.unwrap_or(443);
-        get_https_status(host, port, path, timeout)
+        get_https_status(host, port, path, timeout, headers)
     } else {
         let port = parsed_url.port.unwrap_or(80);
-        get_http_status(host, port, path, timeout)
+        get_http_status(host, port, path, timeout, headers)
     }
 }
 
@@ -119,7 +133,7 @@ pub fn get(url: &str, timeout: u64) -> Result<String, Box<dyn std::error::Error>
         let stream = connect_tcp(host, port, timeout)?;
         let connector = TlsConnector::new()?;
         let mut ssl_stream = connector.connect(host, stream)?;
-        let request = build_request(host, path);
+        let request = build_request(host, path, &[]);
         ssl_stream.write_all(request.as_bytes())?;
         let mut full_response = Vec::new();
         ssl_stream.read_to_end(&mut full_response)?;
@@ -127,7 +141,7 @@ pub fn get(url: &str, timeout: u64) -> Result<String, Box<dyn std::error::Error>
     } else {
         let port = parsed_url.port.unwrap_or(80);
         let mut stream = connect_tcp(host, port, timeout)?;
-        let request = build_request(host, path);
+        let request = build_request(host, path, &[]);
         stream.write_all(request.as_bytes())?;
         let mut full_response = Vec::new();
         stream.read_to_end(&mut full_response)?;

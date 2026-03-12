@@ -33,6 +33,7 @@ OPTIONS:
     -c, --count <count>     Set the number of connection attempts (default: 65535)
     -m, --minimal           Changes the Prints to be more Minimal
     -a, --no-asn            Disable ASN/organization lookups (use static data)
+    -C, --config [path]     Load settings from a config file (default: meowping.conf next to the executable)
 ```
 
 
@@ -56,6 +57,28 @@ OPTIONS:
 ```powershell
 ./meowping 8.8.8.8 -p 53 -a
 ```
+
+## Config File
+
+Place a `meowping.conf` next to the executable (or pass `--config /path/to/file.conf`) to set persistent defaults and custom HTTP headers.
+
+```ini
+# meowping.conf
+
+[settings]
+minimal = true
+no_asn  = false
+
+[headers]
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.9
+```
+
+- Both sections are optional.
+- `[settings]` supports `minimal` and `no_asn` — CLI flags always take precedence.
+- `[headers]` replaces the built-in defaults for `-s`/`--http` checks entirely. `Host` and `Connection: close` are always added automatically.
+- Blank lines and lines starting with `#` are ignored.
 
 **For Linux users to get ICMP working.**
 

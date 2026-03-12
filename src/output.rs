@@ -78,6 +78,7 @@ pub fn print_help() {
     println!("    -m, --minimal             Changes the Prints to be more Minimal");
     println!("    -s, --http              Check if the destination URL is online via HTTP/S");
     println!("    -a, --no-asn            Disable ASN/organization lookups (use static data)");
+    println!("    -C, --config [path]     Load settings from a config file (default: meowping.conf next to the executable)");
 
     println!("\n{}", "Examples:".bright_blue());
 

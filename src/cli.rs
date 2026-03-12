@@ -42,6 +42,46 @@ impl Arguments {
             .map_err(|e| format!("Failed to parse positional argument: {e}"))
     }
 
+    /// Returns `None` if the flag is not present, `Some(None)` if the flag is present
+    /// but has no value (next arg starts with `-` or there is no next arg), or
+    /// `Some(Some(value))` if the flag is present with a value.
+    pub fn opt_flag_with_optional_value<const N: usize>(
+        &mut self,
+        names: [&str; N],
+    ) -> Option<Option<String>> {
+        // Check --name=value syntax first
+        for (i, arg) in self.args.iter().enumerate() {
+            for name in names {
+                if let Some(rest) = arg.strip_prefix(name) {
+                    if let Some(value) = rest.strip_prefix('=') {
+                        let value = value.to_string();
+                        self.args.remove(i);
+                        return Some(Some(value));
+                    }
+                }
+            }
+        }
+
+        // Then check standalone --name or --name value
+        let mut i = 0;
+        while i < self.args.len() {
+            if names.iter().any(|&name| self.args[i] == name) {
+                self.args.remove(i);
+                // If next arg exists and doesn't look like a flag, treat it as the value
+                if i < self.args.len() && !self.args[i].starts_with('-') {
+                    let value = self.args.remove(i);
+                    return Some(Some(value));
+                } else {
+                    return Some(None);
+                }
+            } else {
+                i += 1;
+            }
+        }
+
+        None
+    }
+
     pub fn opt_value_from_str<T, const N: usize>(
         &mut self,
         names: [&str; N],

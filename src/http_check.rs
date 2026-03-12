@@ -8,9 +8,10 @@ pub fn perform_http_check(
     timeout: u64,
     count: usize,
     minimal: bool,
+    headers: &[String],
 ) -> Result<(), Box<dyn Error>> {
     for i in 0..count {
-        match check_http_status(url, minimal, timeout) {
+        match check_http_status(url, minimal, timeout, headers) {
             Ok(status) => {
                 println!("{}", status);
             }
@@ -25,8 +26,8 @@ pub fn perform_http_check(
     Ok(())
 }
 
-fn check_http_status(url: &str, minimal: bool, timeout: u64) -> Result<String, Box<dyn Error>> {
-    match https::get_status(url, timeout) {
+fn check_http_status(url: &str, minimal: bool, timeout: u64, headers: &[String]) -> Result<String, Box<dyn Error>> {
+    match https::get_status(url, timeout, headers) {
         Ok(status) => {
             let (status_text, is_online) = match status {
                 200..=399 => ("online", true),
