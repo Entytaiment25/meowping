@@ -3,20 +3,20 @@ name: Rust
 on:
   push:
     paths:
-      - 'src/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'build.rs'
-      - '.ci/**'
-      - '.github/workflows/rust.yml'
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "build.rs"
+      - ".ci/**"
+      - ".github/workflows/rust.yml"
   pull_request:
     paths:
-      - 'src/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'build.rs'
-      - '.ci/**'
-      - '.github/workflows/rust.yml'
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "build.rs"
+      - ".ci/**"
+      - ".github/workflows/rust.yml"
 
 permissions:
   contents: read
