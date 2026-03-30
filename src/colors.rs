@@ -1,9 +1,9 @@
 #[cfg(target_os = "windows")]
 pub mod fix_ansicolor {
-    use winapi::um::consoleapi::{GetConsoleMode, SetConsoleMode};
-    use winapi::um::processenv::GetStdHandle;
-    use winapi::um::winbase::STD_OUTPUT_HANDLE;
-    use winapi::um::wincon::ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+    use windows_sys::Win32::System::Console::{
+        ENABLE_VIRTUAL_TERMINAL_PROCESSING, GetConsoleMode, GetStdHandle, STD_OUTPUT_HANDLE,
+        SetConsoleMode,
+    };
 
     pub fn enable_ansi_support() {
         unsafe {
@@ -12,7 +12,7 @@ pub mod fix_ansicolor {
                 eprintln!("Failed to get standard output handle.");
                 return;
             }
-            let mut mode = 0;
+            let mut mode = 0u32;
             if GetConsoleMode(stdout_handle, &mut mode) == 0 {
                 eprintln!("Failed to get current console mode.");
                 return;

@@ -52,12 +52,12 @@ impl Arguments {
         // Check --name=value syntax first
         for (i, arg) in self.args.iter().enumerate() {
             for name in names {
-                if let Some(rest) = arg.strip_prefix(name) {
-                    if let Some(value) = rest.strip_prefix('=') {
-                        let value = value.to_string();
-                        self.args.remove(i);
-                        return Some(Some(value));
-                    }
+                if let Some(rest) = arg.strip_prefix(name)
+                    && let Some(value) = rest.strip_prefix('=')
+                {
+                    let value = value.to_string();
+                    self.args.remove(i);
+                    return Some(Some(value));
                 }
             }
         }

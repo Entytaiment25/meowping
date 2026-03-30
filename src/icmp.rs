@@ -59,7 +59,7 @@ mod platform {
                 fd,
                 libc::SOL_SOCKET,
                 libc::SO_RCVTIMEO,
-                &tv as *const _ as *const libc::c_void,
+                &raw const tv as *const libc::c_void,
                 mem::size_of::<libc::timeval>() as libc::socklen_t,
             )
         };
@@ -76,7 +76,7 @@ mod platform {
                 fd,
                 libc::IPPROTO_IP,
                 libc::IP_TTL,
-                &ttl_val as *const _ as *const libc::c_void,
+                &raw const ttl_val as *const libc::c_void,
                 mem::size_of::<libc::c_int>() as libc::socklen_t,
             )
         };
@@ -93,7 +93,7 @@ mod platform {
                 fd,
                 libc::IPPROTO_IPV6,
                 libc::IPV6_UNICAST_HOPS,
-                &ttl_val as *const _ as *const libc::c_void,
+                &raw const ttl_val as *const libc::c_void,
                 mem::size_of::<libc::c_int>() as libc::socklen_t,
             )
         };
@@ -158,7 +158,7 @@ mod platform {
             s6_addr: ip.octets(),
         };
 
-        let addr_ptr = &addr as *const libc::sockaddr_in6 as *const libc::sockaddr;
+        let addr_ptr = &raw const addr as *const libc::sockaddr;
         let addr_len = mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t;
 
         let send_time = Instant::now();
@@ -186,8 +186,8 @@ mod platform {
                 buf.as_mut_ptr() as *mut libc::c_void,
                 buf.len(),
                 0,
-                &mut from as *mut _ as *mut libc::sockaddr,
-                &mut from_len as *mut _,
+                &raw mut from as *mut libc::sockaddr,
+                &raw mut from_len,
             )
         };
         if received < 0 {
@@ -265,7 +265,7 @@ mod platform {
             s_addr: u32::from_be_bytes(ip.octets()).to_be(),
         };
 
-        let addr_ptr = &addr as *const libc::sockaddr_in as *const libc::sockaddr;
+        let addr_ptr = &raw const addr as *const libc::sockaddr;
         let addr_len = mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
 
         let send_time = Instant::now();
@@ -293,8 +293,8 @@ mod platform {
                 buf.as_mut_ptr() as *mut libc::c_void,
                 buf.len(),
                 0,
-                &mut from as *mut _ as *mut libc::sockaddr,
-                &mut from_len as *mut _,
+                &raw mut from as *mut libc::sockaddr,
+                &raw mut from_len,
             )
         };
         if received < 0 {

@@ -1,6 +1,6 @@
 [package]
 name = "meowping"
-version = "2.0.3"
+version = "2.0.4"
 authors = ["Entytaiment25"]
 edition = "2024"
 rust-version = "1.94.1"
@@ -44,12 +44,8 @@ libc = { version = "0.2.183" }
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_NetworkManagement_IpHelper",
+    "Win32_System_Console",
 ], default-features = false }
-
-[target.'cfg(windows)'.dependencies.winapi]
-version = "0.3.9"
-default-features = false
-features = ["consoleapi", "processenv", "winbase", "wincon"]
 
 [target.'cfg(windows)'.build-dependencies]
 windres = "0.2.2"
