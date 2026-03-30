@@ -89,6 +89,12 @@ sudo setcap cap_net_raw+ep ./meowping
 ```
 
 **For macOS Users**
+**Installation**
+```bash
+brew tap Entytaiment25/meowping
+brew install meowping
+```
+
 Run `meowping` with elevated privileges using `sudo` to enable ICMP functionality
 
 ```bash
