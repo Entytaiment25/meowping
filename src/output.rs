@@ -57,9 +57,10 @@ pub fn color_time(time_ms: f64) -> String {
 
 pub fn print_help() {
     let name = env!("CARGO_PKG_NAME");
+    let version = env!("CARGO_PKG_VERSION").bright_blue();
     println!(
-        "{} - A flexible ping utility Tool written in Rust, that is focused on being size efficient and fast.",
-        name
+        "{} {} - A flexible ping utility Tool written in Rust, that is focused on being size efficient and fast.",
+        name, version
     );
     println!(
         "\n{}: {} <destination> [options]",
