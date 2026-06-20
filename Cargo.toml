@@ -1,9 +1,11 @@
+cargo-features = ["panic-immediate-abort"]
+
 [package]
 name = "meowping"
-version = "2.0.5"
+version = "2.0.6"
 authors = ["Entytaiment25"]
 edition = "2024"
-rust-version = "1.94.1"
+rust-version = "1.96.0"
 description = " A flexible ping utility Tool written in Rust, that is focused on being size efficient and fast."
 repository = "https://github.com/entytaiment25/meowping"
 license = "MIT"
@@ -31,14 +33,14 @@ codegen-units = 1
 lto = "fat"
 overflow-checks = true
 opt-level = "z"
-panic = "abort"
+panic = "immediate-abort"
 strip = "symbols"
 
 [dependencies]
 native-tls = { version = "0.2.18", features = ["vendored"] }
 
 [target.'cfg(unix)'.dependencies]
-libc = { version = "0.2.185" }
+libc = { version = "0.2.186" }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [

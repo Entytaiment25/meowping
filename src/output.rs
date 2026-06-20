@@ -1,12 +1,17 @@
 use crate::colors::{Colorize, HyperLink};
 use std::collections::VecDeque;
+use std::time::Duration;
 
-pub fn print_with_prefix(minimal: bool, message: String) {
+pub fn print_with_prefix(minimal: bool, message: &str) {
     if minimal {
-        println!("{}", message);
+        println!("{message}");
     } else {
         println!("{} {}", "[MEOWPING]".magenta(), message);
     }
+}
+
+pub fn micros_to_ms(micros: u128) -> f64 {
+    Duration::from_micros(u64::try_from(micros).unwrap_or(u64::MAX)).as_secs_f64() * 1000.0
 }
 
 pub fn print_statistics(protocol: &str, count: usize, successes: usize, times: &VecDeque<u128>) {
@@ -14,40 +19,44 @@ pub fn print_statistics(protocol: &str, count: usize, successes: usize, times: &
 
     let good_times: Vec<u128> = times.iter().copied().filter(|&t| t > 0).collect();
 
-    let (min_time, max_time, avg_time) = if !good_times.is_empty() {
-        let min = (*good_times.iter().min().unwrap() as f32) / 1000.0;
-        let max = (*good_times.iter().max().unwrap() as f32) / 1000.0;
-        let avg = (good_times.iter().sum::<u128>() as f32) / (good_times.len() as f32) / 1000.0;
-        (min, max, avg)
-    } else {
+    let (min_time, max_time, avg_time) = if good_times.is_empty() {
         (0.0, 0.0, 0.0)
+    } else {
+        let min = good_times.iter().copied().min().map_or(0.0, micros_to_ms);
+        let max = good_times.iter().copied().max().map_or(0.0, micros_to_ms);
+        let total_ms: f64 = good_times.iter().copied().map(micros_to_ms).sum();
+        let sample_count = f64::from(u32::try_from(good_times.len()).unwrap_or(u32::MAX));
+        let avg = total_ms / sample_count;
+        (min, max, avg)
     };
 
     let loss_percentage = if count > 0 {
-        ((failed as f32) / (count as f32)) * 100.0
+        let failed_count = f64::from(u32::try_from(failed).unwrap_or(u32::MAX));
+        let total_count = f64::from(u32::try_from(count).unwrap_or(u32::MAX));
+        (failed_count / total_count) * 100.0
     } else {
         0.0
     };
 
-    println!("\n{} Ping statistics:", protocol);
+    println!("\n{protocol} Ping statistics:");
     println!(
         "\tAttempted = {}, Successes = {}, Failures = {} ({} loss)",
         count.to_string().bright_blue(),
         successes.to_string().bright_blue(),
         failed.to_string().bright_blue(),
-        format!("{:.2}%", loss_percentage).bright_blue()
+        format!("{loss_percentage:.2}%").bright_blue()
     );
     println!("Approximate round trip times:");
     println!(
         "\tMinimum = {}, Maximum = {}, Average = {}",
-        format!("{:.2}ms", min_time).bright_blue(),
-        format!("{:.2}ms", max_time).bright_blue(),
-        format!("{:.2}ms", avg_time).bright_blue()
+        format!("{min_time:.2}ms").bright_blue(),
+        format!("{max_time:.2}ms").bright_blue(),
+        format!("{avg_time:.2}ms").bright_blue()
     );
 }
 
 pub fn color_time(time_ms: f64) -> String {
-    let msg = format!("{:.2}ms", time_ms);
+    let msg = format!("{time_ms:.2}ms");
     match time_ms {
         t if t >= 250.0 => msg.orange(),
         t if t >= 100.0 => msg.yellow(),
@@ -59,8 +68,7 @@ pub fn print_help() {
     let name = env!("CARGO_PKG_NAME");
     let version = env!("CARGO_PKG_VERSION").bright_blue();
     println!(
-        "{} {} - A flexible ping utility Tool written in Rust, that is focused on being size efficient and fast.",
-        name, version
+        "{name} {version} - A flexible ping utility Tool written in Rust, that is focused on being size efficient and fast."
     );
     println!(
         "\n{}: {} <destination> [options]",
@@ -86,28 +94,28 @@ pub fn print_help() {
     println!("\n{}", "Examples:".bright_blue());
 
     println!("\n  {}:", "Single Host Ping".yellow());
-    println!("    {} google.com", name);
-    println!("    {} 8.8.8.8 -c 10", name);
-    println!("    {} 2606:4700:4700::1111", name);
+    println!("    {name} google.com");
+    println!("    {name} 8.8.8.8 -c 10");
+    println!("    {name} 2606:4700:4700::1111");
 
     println!("\n  {}:", "TCP Port Check".yellow());
-    println!("    {} example.com -p 443", name);
-    println!("    {} 192.168.1.1 -p 22 -t 2000", name);
+    println!("    {name} example.com -p 443");
+    println!("    {name} 192.168.1.1 -p 22 -t 2000");
 
     println!("\n  {}:", "HTTP/HTTPS Check".yellow());
-    println!("    {} https://example.com -s", name);
-    println!("    {} example.com -s -c 5", name);
+    println!("    {name} https://example.com -s");
+    println!("    {name} example.com -s -c 5");
 
     println!("\n  {}:", "Multi-Ping (Multiple Destinations)".yellow());
-    println!("    {} google.com,cloudflare.com,1.1.1.1 -c 2", name);
-    println!("    {} \"8.8.8.8,1.1.1.1,9.9.9.9\" -c 10", name);
+    println!("    {name} google.com,cloudflare.com,1.1.1.1 -c 2");
+    println!("    {name} \"8.8.8.8,1.1.1.1,9.9.9.9\" -c 10");
 
     println!("\n  {}:", "Subnet Scanning".yellow());
-    println!("    {} 192.168.1.0/24", name);
-    println!("    {} 10.0.0.0/28 -c 3", name);
-    println!("    {} 192.168.1.0/24 -p 80", name);
-    println!("    {} 2001:db8::/120", name);
-    println!("    {} fe80::/112 -p 22", name);
+    println!("    {name} 192.168.1.0/24");
+    println!("    {name} 10.0.0.0/28 -c 3");
+    println!("    {name} 192.168.1.0/24 -p 80");
+    println!("    {name} 2001:db8::/120");
+    println!("    {name} fe80::/112 -p 22");
 
     println!("\n{}:", "IPv6 Support".bright_blue());
     println!("    MeowPing supports IPv6 addresses for all connection types (ICMP, TCP, HTTP)");
@@ -127,12 +135,11 @@ pub fn print_welcome() {
     let message = format!(
         "
     ／l、
-  （ﾟ､ ｡ ７      welcome to {}!
-    l  ~ヽ       {}
+  （ﾟ､ ｡ ７      welcome to {hyperlink}!
+    l  ~ヽ       {version_format}
     じしf_,)ノ
-",
-        hyperlink, version_format
+"
     )
     .magenta();
-    println!("{}", message);
+    println!("{message}");
 }

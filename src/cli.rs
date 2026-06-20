@@ -1,6 +1,12 @@
 use std::env;
 use std::str::FromStr;
 
+pub enum OptionalFlagValue {
+    Missing,
+    PresentWithoutValue,
+    Present(String),
+}
+
 pub struct Arguments {
     args: Vec<String>,
 }
@@ -42,13 +48,13 @@ impl Arguments {
             .map_err(|e| format!("Failed to parse positional argument: {e}"))
     }
 
-    /// Returns `None` if the flag is not present, `Some(None)` if the flag is present
-    /// but has no value (next arg starts with `-` or there is no next arg), or
-    /// `Some(Some(value))` if the flag is present with a value.
+    /// Returns [`OptionalFlagValue::Missing`] if the flag is absent,
+    /// [`OptionalFlagValue::PresentWithoutValue`] if it appears without a value,
+    /// or [`OptionalFlagValue::Present`] when a value is supplied.
     pub fn opt_flag_with_optional_value<const N: usize>(
         &mut self,
         names: [&str; N],
-    ) -> Option<Option<String>> {
+    ) -> OptionalFlagValue {
         // Check --name=value syntax first
         for (i, arg) in self.args.iter().enumerate() {
             for name in names {
@@ -57,7 +63,7 @@ impl Arguments {
                 {
                     let value = value.to_string();
                     self.args.remove(i);
-                    return Some(Some(value));
+                    return OptionalFlagValue::Present(value);
                 }
             }
         }
@@ -70,16 +76,14 @@ impl Arguments {
                 // If next arg exists and doesn't look like a flag, treat it as the value
                 if i < self.args.len() && !self.args[i].starts_with('-') {
                     let value = self.args.remove(i);
-                    return Some(Some(value));
-                } else {
-                    return Some(None);
+                    return OptionalFlagValue::Present(value);
                 }
-            } else {
-                i += 1;
+                return OptionalFlagValue::PresentWithoutValue;
             }
+            i += 1;
         }
 
-        None
+        OptionalFlagValue::Missing
     }
 
     pub fn opt_value_from_str<T, const N: usize>(
@@ -101,7 +105,7 @@ impl Arguments {
 
                 let value = value_str
                     .parse::<T>()
-                    .map_err(|e| format!("Failed to parse value for {e}: {}", name))?;
+                    .map_err(|e| format!("Failed to parse value for {e}: {name}"))?;
                 self.args.remove(i);
                 return Ok(Some(value));
             }
@@ -120,9 +124,8 @@ impl Arguments {
                     .parse::<T>()
                     .map_err(|e| format!("Failed to parse value for {name_taken}: {e}"))?;
                 return Ok(Some(value));
-            } else {
-                i += 1;
             }
+            i += 1;
         }
 
         Ok(None)

@@ -55,7 +55,7 @@ impl Colorize for str {
 use crate::parser::Parser;
 use std::fmt::Display;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HyperLink {
     text: String,
     link: String,
@@ -79,7 +79,7 @@ impl HyperLink {
 
 impl Display for HyperLink {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let HyperLink { text, link } = self;
+        let Self { text, link } = self;
         write!(f, "\x1b]8;;{link}\x1b\\{text}\x1b]8;;\x1b\\")
     }
 }

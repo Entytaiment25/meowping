@@ -9,21 +9,20 @@ pub fn perform_http_check(
     count: usize,
     minimal: bool,
     headers: &[String],
-) -> Result<(), Box<dyn Error>> {
+) {
     for i in 0..count {
         match check_http_status(url, minimal, timeout, headers) {
             Ok(status) => {
-                println!("{}", status);
+                println!("{status}");
             }
             Err(e) => {
-                println!("{}", e);
+                println!("{e}");
             }
         }
         if i < count - 1 {
             sleep(Duration::from_secs(1));
         }
     }
-    Ok(())
 }
 
 fn check_http_status(
@@ -41,9 +40,9 @@ fn check_http_status(
                 _ => ("unknown status", true),
             };
 
-            let message = format!("{} is {}. HTTP status: {}", url, status_text, status);
+            let message = format!("{url} is {status_text}. HTTP status: {status}");
             let formatted = if minimal {
-                message.clone()
+                message
             } else {
                 format!("{} {}", "[MEOWPING]".magenta_str(), message)
             };
@@ -81,6 +80,6 @@ trait MagentaStr {
 
 impl MagentaStr for str {
     fn magenta_str(&self) -> String {
-        format!("\x1b[35m{}\x1b[0m", self)
+        format!("\x1b[35m{self}\x1b[0m")
     }
 }

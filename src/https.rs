@@ -15,11 +15,11 @@ const DEFAULT_HEADERS: &[&str] = &[
 /// added by this function. If `extra_headers` is empty the built-in defaults
 /// are used; otherwise `extra_headers` replace them entirely.
 fn build_request(host: &str, path: &str, extra_headers: &[String]) -> String {
-    let mut req = format!("GET {} HTTP/1.1\r\nHost: {}\r\n", path, host);
+    let mut req = format!("GET {path} HTTP/1.1\r\nHost: {host}\r\n");
     let headers: &[_] = if extra_headers.is_empty() {
         &DEFAULT_HEADERS
             .iter()
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .collect::<Vec<_>>()
     } else {
         extra_headers

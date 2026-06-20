@@ -19,7 +19,7 @@ impl Config {
     pub fn default_path() -> PathBuf {
         std::env::current_exe()
             .ok()
-            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
             .unwrap_or_else(|| PathBuf::from("."))
             .join("meowping.conf")
     }
@@ -96,7 +96,7 @@ impl Config {
             }
         }
 
-        Ok(Config {
+        Ok(Self {
             minimal,
             no_asn,
             http_headers,
@@ -108,9 +108,6 @@ fn parse_bool(s: &str, line: usize) -> Result<bool, String> {
     match s {
         "true" | "1" | "yes" => Ok(true),
         "false" | "0" | "no" => Ok(false),
-        _ => Err(format!(
-            "Config line {}: expected true/false, got: {}",
-            line, s
-        )),
+        _ => Err(format!("Config line {line}: expected true/false, got: {s}")),
     }
 }

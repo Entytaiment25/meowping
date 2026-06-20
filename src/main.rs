@@ -1,3 +1,6 @@
+#![deny(warnings)]
+#![warn(clippy::pedantic, clippy::nursery)]
+
 use std::{error::Error, net::IpAddr};
 
 mod cli;
@@ -11,7 +14,7 @@ mod parser;
 mod subnet;
 mod tcp;
 
-use cli::Arguments;
+use cli::{Arguments, OptionalFlagValue};
 use colors::Colorize;
 use http_check::perform_http_check;
 use icmp::{DEFAULT_ICMP_PAYLOAD, DEFAULT_IDENT, DEFAULT_TTL, perform_icmp};
@@ -34,39 +37,38 @@ fn handle_http_check(
     minimal: bool,
     is_multi: bool,
     headers: &[String],
-) -> Result<(), Box<dyn Error>> {
+) {
     if is_multi {
         for url in destinations {
             let url = if !url.starts_with("http://") && !url.starts_with("https://") {
-                format!("http://{}", url)
+                format!("http://{url}")
             } else {
                 url.clone()
             };
-            let _ = perform_http_check(&url, timeout, count, minimal, headers);
+            perform_http_check(&url, timeout, count, minimal, headers);
         }
     } else {
         let url = if !destination_input.starts_with("http://")
             && !destination_input.starts_with("https://")
         {
-            format!("http://{}", destination_input)
+            format!("http://{destination_input}")
         } else {
             destination_input.to_string()
         };
-        perform_http_check(&url, timeout, count, minimal, headers)?;
+        perform_http_check(&url, timeout, count, minimal, headers);
     }
-    Ok(())
 }
 
 #[inline(never)]
 fn handle_subnet_scan(
-    subnet: &Ipv4Subnet,
+    subnet: Ipv4Subnet,
     port: Option<u16>,
     timeout: u64,
     per_host_attempts: usize,
     minimal: bool,
-) -> Result<(), Box<dyn Error>> {
+) {
     if let Some(p) = port {
-        perform_tcp_subnet_scan(subnet, p, timeout, per_host_attempts, minimal)?;
+        perform_tcp_subnet_scan(subnet, p, timeout, per_host_attempts, minimal);
     } else {
         perform_icmp_subnet_scan(
             subnet,
@@ -76,9 +78,8 @@ fn handle_subnet_scan(
             per_host_attempts,
             &DEFAULT_ICMP_PAYLOAD,
             minimal,
-        )?;
+        );
     }
-    Ok(())
 }
 
 #[inline(never)]
@@ -88,9 +89,9 @@ fn handle_ipv6_subnet_scan(
     timeout: u64,
     per_host_attempts: usize,
     minimal: bool,
-) -> Result<(), Box<dyn Error>> {
+) {
     if let Some(p) = port {
-        perform_tcp_ipv6_subnet_scan(subnet, p, timeout, per_host_attempts, minimal)?;
+        perform_tcp_ipv6_subnet_scan(subnet, p, timeout, per_host_attempts, minimal);
     } else {
         perform_icmp_ipv6_subnet_scan(
             subnet,
@@ -100,9 +101,8 @@ fn handle_ipv6_subnet_scan(
             per_host_attempts,
             &DEFAULT_ICMP_PAYLOAD,
             minimal,
-        )?;
+        );
     }
-    Ok(())
 }
 
 #[inline(never)]
@@ -119,11 +119,11 @@ fn resolve_destination(dest: &str, minimal: bool) -> Option<String> {
     } else {
         match Parser::extract_url(dest) {
             Extracted::Error => {
-                let message = format!("DNS Lookup of domain failed: Invalid host or URL: {}", dest);
-                if !minimal {
-                    println!("{} {}", "[MEOWPING]".magenta(), message);
+                let message = format!("DNS Lookup of domain failed: Invalid host or URL: {dest}");
+                if minimal {
+                    println!("{message}");
                 } else {
-                    println!("{}", message);
+                    println!("{} {}", "[MEOWPING]".magenta(), message);
                 }
                 None
             }
@@ -169,7 +169,7 @@ fn handle_single_destination(
         .ok_or("DNS Lookup of domain failed: Invalid host or URL")?;
 
     match port {
-        Some(p) => perform_tcp(&destination, p, timeout, count.into(), minimal, no_asn)?,
+        Some(p) => perform_tcp(&destination, p, timeout, count, minimal, no_asn)?,
         None => {
             perform_icmp(
                 &destination,
@@ -185,6 +185,51 @@ fn handle_single_destination(
     Ok(())
 }
 
+fn load_config(args: &mut Arguments) -> Result<Option<config::Config>, Box<dyn Error>> {
+    match args.opt_flag_with_optional_value(["-C", "--config"]) {
+        OptionalFlagValue::Present(path) => {
+            let config_path = std::path::PathBuf::from(path);
+            Ok(Some(
+                config::Config::load(&config_path).map_err(|e| -> Box<dyn Error> { e.into() })?,
+            ))
+        }
+        OptionalFlagValue::PresentWithoutValue => {
+            let config_path = config::Config::default_path();
+            if config_path.exists() {
+                Ok(Some(
+                    config::Config::load(&config_path)
+                        .map_err(|e| -> Box<dyn Error> { e.into() })?,
+                ))
+            } else {
+                Ok(None)
+            }
+        }
+        OptionalFlagValue::Missing => Ok(None),
+    }
+}
+
+fn read_destination(args: &mut Arguments) -> Result<String, Box<dyn Error>> {
+    let Ok(destination_input) = args.free_from_str::<String>() else {
+        output::print_help();
+        #[cfg(target_os = "windows")]
+        {
+            println!("\nPress Enter to exit...");
+            let _ = std::io::stdin().read_line(&mut String::new());
+        }
+        return Err("Destination argument missing".into());
+    };
+
+    Ok(destination_input)
+}
+
+fn parse_count(args: &mut Arguments) -> Result<(usize, bool), Box<dyn Error>> {
+    match args.opt_value_from_str(["-c", "--count"]) {
+        Ok(Some(count)) => Ok((count, true)),
+        Ok(None) => Ok((65_535, false)),
+        Err(_) => Err("Failed to parse count argument".into()),
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(target_os = "windows")]
     fix_ansicolor::enable_ansi_support();
@@ -196,22 +241,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    // Load config file if --config flag is present
-    let cfg = match args.opt_flag_with_optional_value(["-C", "--config"]) {
-        Some(Some(path)) => {
-            let p = std::path::PathBuf::from(&path);
-            Some(config::Config::load(&p).map_err(|e| -> Box<dyn Error> { e.into() })?)
-        }
-        Some(None) => {
-            let p = config::Config::default_path();
-            if p.exists() {
-                Some(config::Config::load(&p).map_err(|e| -> Box<dyn Error> { e.into() })?)
-            } else {
-                None
-            }
-        }
-        None => None,
-    };
+    let cfg = load_config(&mut args)?;
     let cfg = cfg.as_ref();
 
     let minimal =
@@ -219,18 +249,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let http_check = args.contains(["-s", "--http"]);
     let no_asn = args.contains(["-a", "--no-asn"]) || cfg.and_then(|c| c.no_asn).unwrap_or(false);
 
-    let destination_input = match args.free_from_str::<String>() {
-        Ok(dest) => dest,
-        Err(_) => {
-            output::print_help();
-            #[cfg(target_os = "windows")]
-            {
-                println!("\nPress Enter to exit...");
-                let _ = std::io::stdin().read_line(&mut String::new());
-            }
-            return Err("Destination argument missing".into());
-        }
-    };
+    let destination_input = read_destination(&mut args)?;
 
     let mut destinations = parse_multiple_destinations(&destination_input);
     if destinations.len() > 1 {
@@ -239,10 +258,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         destinations.retain(|d| seen.insert(d.clone()));
     }
     let is_multi = destinations.len() > 1;
-    let subnet_target = if !is_multi {
-        Ipv4Subnet::from_str(&destination_input).ok()
-    } else {
+    let subnet_target = if is_multi {
         None
+    } else {
+        Ipv4Subnet::from_str(&destination_input).ok()
     };
     let ipv6_subnet_target = if !is_multi && subnet_target.is_none() {
         Ipv6Subnet::from_str(&destination_input).ok()
@@ -255,32 +274,29 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map_err(|_| "Failed to parse timeout argument")?
         .unwrap_or(1000);
 
-    let (count, count_from_cli) = match args.opt_value_from_str(["-c", "--count"]) {
-        Ok(Some(c)) => (c, true),
-        Ok(None) => (65535, false),
-        Err(_) => return Err("Failed to parse count argument".into()),
-    };
+    let (count, count_from_cli) = parse_count(&mut args)?;
     let per_host_attempts: usize =
         if (subnet_target.is_some() || ipv6_subnet_target.is_some()) && !count_from_cli {
             1
         } else {
-            count as usize
+            count
         };
 
     if http_check {
         if subnet_target.is_some() || ipv6_subnet_target.is_some() {
             return Err("HTTP checking is not supported for subnet targets".into());
         }
-        let http_headers = cfg.map(|c| c.http_headers.as_slice()).unwrap_or(&[]);
-        return handle_http_check(
+        let http_headers = cfg.map_or(&[][..], |c| c.http_headers.as_slice());
+        handle_http_check(
             &destinations,
             &destination_input,
             timeout,
-            count as usize,
+            count,
             minimal,
             is_multi,
             http_headers,
         );
+        return Ok(());
     }
 
     let port = args
@@ -292,28 +308,23 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if let Some(subnet) = subnet_target {
-        return handle_subnet_scan(&subnet, port, timeout, per_host_attempts, minimal);
+        handle_subnet_scan(subnet, port, timeout, per_host_attempts, minimal);
+        return Ok(());
     }
 
     if let Some(ipv6_subnet) = ipv6_subnet_target {
-        return handle_ipv6_subnet_scan(&ipv6_subnet, port, timeout, per_host_attempts, minimal);
+        handle_ipv6_subnet_scan(&ipv6_subnet, port, timeout, per_host_attempts, minimal);
+        return Ok(());
     }
 
     if is_multi {
         if let Some(p) = port {
-            perform_tcp_multi_scan(&destinations, p, timeout, count as usize, minimal, no_asn);
+            perform_tcp_multi_scan(&destinations, p, timeout, count, minimal, no_asn);
         } else {
-            handle_multi_icmp(&destinations, timeout, count as usize, minimal);
+            handle_multi_icmp(&destinations, timeout, count, minimal);
         }
     } else {
-        handle_single_destination(
-            &destination_input,
-            port,
-            timeout,
-            count as usize,
-            minimal,
-            no_asn,
-        )?;
+        handle_single_destination(&destination_input, port, timeout, count, minimal, no_asn)?;
     }
 
     Ok(())

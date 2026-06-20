@@ -15,7 +15,7 @@ impl Parser {
             }
         };
 
-        let host_end = url.find('/').unwrap_or_else(|| url.len());
+        let host_end = url.find('/').unwrap_or(url.len());
 
         let host_port = &url[..host_end];
         let path = if host_end < url.len() {
@@ -47,7 +47,7 @@ impl Parser {
             return Err("Invalid host");
         }
 
-        Ok(Parser {
+        Ok(Self {
             scheme: scheme.to_string(),
             host: host.to_string(),
             port,
@@ -70,14 +70,13 @@ impl Parser {
     fn is_resolvable_hostname(hostname: &str) -> bool {
         use std::net::ToSocketAddrs;
         let socket_str = if hostname.contains(':') {
-            format!("[{}]:80", hostname)
+            format!("[{hostname}]:80")
         } else {
-            format!("{}:80", hostname)
+            format!("{hostname}:80")
         };
         socket_str
             .to_socket_addrs()
-            .map(|mut addrs| addrs.next().is_some())
-            .unwrap_or(false)
+            .is_ok_and(|mut addrs| addrs.next().is_some())
     }
 }
 
