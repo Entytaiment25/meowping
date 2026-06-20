@@ -41,17 +41,17 @@ jobs:
       - name: Build binary and create archive
         shell: bash
         run: |
-          cargo build --verbose --release
+          cargo build --verbose --release --target "${{ matrix.target }}"
           archive="meowping-${{ github.event.release.tag_name }}-${{ matrix.target }}"
-          cd target/release
+          cd "target/${{ matrix.target }}/release"
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             asset="$archive.zip"
-            7z a "../../$asset" "meowping.exe"
+            7z a "../../../$asset" "meowping.exe"
           else
             asset="$archive.tar.gz"
-            tar czf "../../$asset" "meowping"
+            tar czf "../../../$asset" "meowping"
           fi
-          cd ../..
+          cd ../../..
           echo "ASSET=$asset" >> $GITHUB_ENV
 
       - name: Upload archive
