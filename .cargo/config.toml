@@ -1,3 +1,6 @@
+[build]
+rustflags = ["-Zshare-generics=false"]
+
 [unstable]
 build-std = ["std", "panic_abort"]
 build-std-features = ["optimize_for_size"]
