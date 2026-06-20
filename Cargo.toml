@@ -50,4 +50,4 @@ windows-sys = { version = "0.61.2", features = [
 ], default-features = false }
 
 [target.'cfg(windows)'.build-dependencies]
-windres = "0.2.2"
+embed-resource = "3.0.9"

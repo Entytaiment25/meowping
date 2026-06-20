@@ -1,26 +1,12 @@
-#[cfg(windows)]
-extern crate windres;
-
 fn main() {
     #[cfg(windows)]
-    windows::compile_resources_file();
-}
+    {
+        use std::env;
+        use std::fs;
+        use std::path::Path;
 
-#[cfg(windows)]
-mod windows {
-    use std::env;
-    use std::fs;
-    use std::path::Path;
-
-    use windres::Build;
-
-    pub fn compile_resources_file() {
-        if env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc") {
-            return;
-        }
-
-        let out_dir = env::var_os("OUT_DIR").unwrap();
-        let resource_header = Path::new(&out_dir).join("versions.h");
+        let manifest_dir = env::var_os("CARGO_MANIFEST_DIR").unwrap();
+        let resource_header = Path::new(&manifest_dir).join("versions.h");
         let major = env!("CARGO_PKG_VERSION_MAJOR");
         let minor = env!("CARGO_PKG_VERSION_MINOR");
         let patch = env!("CARGO_PKG_VERSION_PATCH");
@@ -30,24 +16,21 @@ mod windows {
         let name = env!("CARGO_PKG_NAME");
 
         fs::write(
-            resource_header,
+            &resource_header,
             format!(
-                "
-    #define VERSION_MAJOR {major}
-    #define VERSION_MINOR {minor}
-    #define VERSION_PATCH {patch}
-    #define VERSION_FULL \"{full}\"
-    #define VERSION_DESCRIPTION  \"{description}\"
-    #define VERSION_AUTHOR  \"{author}\"
-    #define VERSION_NAME \"{name}\"
-    "
+                "#define VERSION_MAJOR {major}\n\
+                 #define VERSION_MINOR {minor}\n\
+                 #define VERSION_PATCH {patch}\n\
+                 #define VERSION_FULL \"{full}\"\n\
+                 #define VERSION_DESCRIPTION \"{description}\"\n\
+                 #define VERSION_AUTHOR \"{author}\"\n\
+                 #define VERSION_NAME \"{name}\"\n"
             ),
         )
         .unwrap();
 
-        Build::new()
-            .include(out_dir)
-            .compile("resources.rc")
+        embed_resource::compile("resources.rc", embed_resource::NONE)
+            .manifest_optional()
             .unwrap();
     }
 }
