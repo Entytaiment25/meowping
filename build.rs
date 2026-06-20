@@ -15,6 +15,10 @@ mod windows {
     use windres::Build;
 
     pub fn compile_resources_file() {
+        if env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc") {
+            return;
+        }
+
         let out_dir = env::var_os("OUT_DIR").unwrap();
         let resource_header = Path::new(&out_dir).join("versions.h");
         let major = env!("CARGO_PKG_VERSION_MAJOR");
