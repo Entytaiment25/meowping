@@ -13,6 +13,7 @@ fi
 USE_SUDO_ICMP=""
 HAVE_ICMP_PERMS=false
 HAVE_EXT_ICMP=false
+HAVE_IPV6_ICMP=false
 if [[ "$(uname)" == "Darwin" || "$(uname)" == "Linux" ]]; then
     # Check if we have raw socket capabilities or can use sudo
     if timeout 2 $MEOWPING_PATH 127.0.0.1 -c 1 -m >/dev/null 2>&1; then
@@ -37,6 +38,17 @@ if [[ "$(uname)" == "Darwin" || "$(uname)" == "Linux" ]]; then
             HAVE_EXT_ICMP=true
         else
             echo "Note: Outbound ICMP to external hosts appears blocked, skipping external ICMP tests"
+        fi
+
+        if [[ -n "$USE_SUDO_ICMP" ]]; then
+            IPV6_ICMP_TEST=$($USE_SUDO_ICMP $MEOWPING_PATH ::1 -c 1 -m 2>&1 || true)
+        else
+            IPV6_ICMP_TEST=$($MEOWPING_PATH ::1 -c 1 -m 2>&1 || true)
+        fi
+        if echo "$IPV6_ICMP_TEST" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Reply from ::1"; then
+            HAVE_IPV6_ICMP=true
+        else
+            echo "Note: IPv6 ICMP loopback appears unavailable, skipping IPv6 ICMP tests"
         fi
     fi
 fi
@@ -165,7 +177,7 @@ fi
 echo "Running IPv6 tests..."
 
 # Test IPv6 loopback ICMP ping
-if [[ "$HAVE_ICMP_PERMS" == "true" ]]; then
+if [[ "$HAVE_ICMP_PERMS" == "true" && "$HAVE_IPV6_ICMP" == "true" ]]; then
     if [[ -n "$USE_SUDO_ICMP" ]]; then
         OUTPUT_IPV6_1=$($USE_SUDO_ICMP $MEOWPING_PATH ::1 -c 1 -m)
     else
@@ -184,7 +196,7 @@ if [[ "$HAVE_ICMP_PERMS" == "true" ]]; then
         exit 1
     fi
 else
-    echo "Skipping IPv6 ICMP test (insufficient permissions)"
+    echo "Skipping IPv6 ICMP test (insufficient permissions or IPv6 ICMP unavailable)"
 fi
 
 # Test IPv6 TCP connection (loopback on high port, should timeout - that's expected)
@@ -203,7 +215,7 @@ if ! echo "$OUTPUT_IPV6_2" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "protocol=TCP";
 fi
 
 # Test IPv6 subnet scan (/127 = 2 addresses)
-if [[ "$HAVE_ICMP_PERMS" == "true" ]]; then
+if [[ "$HAVE_ICMP_PERMS" == "true" && "$HAVE_IPV6_ICMP" == "true" ]]; then
     if [[ -n "$USE_SUDO_ICMP" ]]; then
         OUTPUT_IPV6_3=$($USE_SUDO_ICMP $MEOWPING_PATH ::1/127 -c 1 -m)
     else
@@ -228,7 +240,7 @@ if [[ "$HAVE_ICMP_PERMS" == "true" ]]; then
         exit 1
     fi
 else
-    echo "Skipping IPv6 subnet ICMP test (insufficient permissions)"
+    echo "Skipping IPv6 subnet ICMP test (insufficient permissions or IPv6 ICMP unavailable)"
 fi
 
 # Test IPv6 subnet rejection (too large)
@@ -271,7 +283,7 @@ if ! echo "$OUTPUT_IPV6_6" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "::1"; then
 fi
 
 # Test mixed IPv4/IPv6 multi-host ICMP
-if [[ "$HAVE_EXT_ICMP" == "true" ]]; then
+if [[ "$HAVE_EXT_ICMP" == "true" && "$HAVE_IPV6_ICMP" == "true" ]]; then
     if [[ -n "$USE_SUDO_ICMP" ]]; then
         OUTPUT_IPV6_7=$($USE_SUDO_ICMP $MEOWPING_PATH 8.8.8.8,::1 -c 1 -m)
     else
@@ -285,7 +297,7 @@ if [[ "$HAVE_EXT_ICMP" == "true" ]]; then
         exit 1
     fi
 else
-    echo "Skipping mixed IPv4/IPv6 ICMP test (outbound ICMP unavailable)"
+    echo "Skipping mixed IPv4/IPv6 ICMP test (outbound ICMP or IPv6 ICMP unavailable)"
 fi
 
 # Test IPv6 help text
