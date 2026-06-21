@@ -80,7 +80,7 @@ fn extract_asn_from_response(response_text: &str) -> String {
     "Unknown ASN".to_string()
 }
 
-fn print_ip_info(destination: &str, ip: &str, minimal: bool) {
+pub fn print_ip_info(destination: &str, ip: &str, minimal: bool) {
     let message = format!(
         "Found IP address of domain {}: {}",
         destination.green(),

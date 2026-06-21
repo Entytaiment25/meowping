@@ -13,7 +13,7 @@ pub mod fix_ansicolor {
                 return;
             }
             let mut mode = 0u32;
-            if GetConsoleMode(stdout_handle, &mut mode) == 0 {
+            if GetConsoleMode(stdout_handle, &raw mut mode) == 0 {
                 eprintln!("Failed to get current console mode.");
                 return;
             }

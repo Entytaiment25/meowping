@@ -103,3 +103,59 @@ pub fn parse_multiple_destinations(input: &str) -> Vec<String> {
         vec![trimmed.to_string()]
     }
 }
+
+pub fn parse_ports(input: &str) -> Result<Vec<u16>, String> {
+    let trimmed = input.trim();
+    let body = if trimmed.starts_with('[') && trimmed.ends_with(']') {
+        &trimmed[1..trimmed.len() - 1]
+    } else {
+        trimmed
+    };
+
+    if body.trim().is_empty() {
+        return Err("No ports specified".to_string());
+    }
+
+    let mut ports: Vec<u16> = Vec::new();
+    for token in body.split(',') {
+        let token = token.trim();
+        if token.is_empty() {
+            continue;
+        }
+        if let Some((start_s, end_s)) = token.split_once('-') {
+            let start: u32 = start_s
+                .trim()
+                .parse()
+                .map_err(|_| format!("Invalid port range start: {token}"))?;
+            let end: u32 = end_s
+                .trim()
+                .parse()
+                .map_err(|_| format!("Invalid port range end: {token}"))?;
+            if end < start {
+                return Err(format!("Port range end before start: {token}"));
+            }
+            if end > u16::MAX.into() {
+                return Err(format!("Port out of range (0-65535): {token}"));
+            }
+            for p in start..=end {
+                ports.push(u16::try_from(p).expect("range bounded by u16::MAX"));
+            }
+        } else {
+            let p: u32 = token
+                .parse()
+                .map_err(|_| format!("Invalid port: {token}"))?;
+            if p > u16::MAX.into() {
+                return Err(format!("Port out of range (0-65535): {token}"));
+            }
+            ports.push(u16::try_from(p).expect("single port bounded by u16::MAX"));
+        }
+    }
+
+    if ports.is_empty() {
+        return Err("No ports specified".to_string());
+    }
+
+    ports.sort_unstable();
+    ports.dedup();
+    Ok(ports)
+}

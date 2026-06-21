@@ -341,7 +341,7 @@ mod platform {
 
 #[cfg(windows)]
 mod platform {
-    use super::*;
+    use super::{Duration, Instant, Ipv4Addr, Ipv6Addr};
     use std::io;
     use std::mem;
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
@@ -379,18 +379,18 @@ mod platform {
             let num = IcmpSendEcho(
                 handle.0 as *mut std::ffi::c_void,
                 u32::from_be_bytes(ip.octets()).to_be(),
-                payload.as_ptr() as _,
-                payload.len() as u16,
+                payload.as_ptr().cast(),
+                u16::try_from(payload.len()).unwrap_or(u16::MAX),
                 std::ptr::null(),
-                reply_buf.as_mut_ptr() as _,
-                reply_buf.len() as u32,
-                timeout.as_millis() as u32,
+                reply_buf.as_mut_ptr().cast(),
+                u32::try_from(reply_buf.len()).unwrap_or(u32::MAX),
+                u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX),
             );
             let rtt = start.elapsed();
 
             if num > 0 {
-                let rep = &*(reply_buf.as_ptr() as *const ICMP_ECHO_REPLY);
-                Ok((rep.DataSize as usize, rtt))
+                let rep = std::ptr::read_unaligned(reply_buf.as_ptr().cast::<ICMP_ECHO_REPLY>());
+                Ok((usize::from(rep.DataSize), rtt))
             } else {
                 Err(io::Error::last_os_error())
             }
@@ -406,6 +406,7 @@ mod platform {
         payload: &[u8; 24],
     ) -> io::Result<(usize, Duration)> {
         #[repr(C)]
+        #[allow(clippy::struct_field_names)]
         struct SockAddrIn6 {
             sin6_family: u16,
             sin6_port: u16,
@@ -466,14 +467,14 @@ mod platform {
                 0, // event = NULL
                 0, // apcroutine = NULL
                 0, // apccontext = NULL
-                &src_addr,
-                &dst_addr,
+                &raw const src_addr,
+                &raw const dst_addr,
                 payload.as_ptr(),
-                payload.len() as u16,
+                u16::try_from(payload.len()).unwrap_or(u16::MAX),
                 0, // requestoptions = NULL
                 reply_buf.as_mut_ptr(),
-                reply_size as u32,
-                timeout.as_millis() as u32,
+                u32::try_from(reply_size).unwrap_or(u32::MAX),
+                u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX),
             );
             let rtt = start.elapsed();
 

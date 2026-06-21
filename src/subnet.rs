@@ -2,9 +2,10 @@ use crate::colors::Colorize;
 use crate::icmp::ping_host_once;
 use crate::output::{color_time, micros_to_ms, print_statistics, print_with_prefix};
 use crate::tcp::tcp_connect_once;
+use crate::udp::{ProbeOutcome, udp_probe_once};
 use std::collections::{HashSet, VecDeque};
 use std::fmt::Write as _;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::thread;
 use std::time::Duration;
 
@@ -372,6 +373,83 @@ fn icmp_probe_chunk(
 
 fn ensure_attempts(attempts: usize) -> usize {
     attempts.max(1)
+}
+
+#[derive(Clone, Copy)]
+struct UdpHostStatus {
+    host: IpAddr,
+    outcome: ProbeOutcome,
+}
+
+fn format_udp_host_status(status: &UdpHostStatus, minimal: bool) -> String {
+    match status.outcome {
+        ProbeOutcome::Open { rtt, .. } => {
+            let colored_ip = status.host.to_string().green();
+            if minimal {
+                colored_ip
+            } else {
+                format!(
+                    "{} {}",
+                    colored_ip,
+                    color_time(micros_to_ms(rtt.as_micros()))
+                )
+            }
+        }
+        ProbeOutcome::Closed => format!("{} closed", status.host.to_string().red()),
+        ProbeOutcome::NoResponse => format!("{} open|filtered", status.host.to_string().orange()),
+    }
+}
+
+fn print_udp_chunk_row(
+    results: &[UdpHostStatus],
+    minimal: bool,
+    attempt_idx: usize,
+    attempts: usize,
+) {
+    if results.is_empty() {
+        return;
+    }
+
+    let entries = results
+        .iter()
+        .map(|status| format_udp_host_status(status, minimal))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let mut line = format!("[{entries}]");
+    if attempts > 1 {
+        line = format!("Attempt {attempt_idx}/{attempts} {line}");
+    }
+
+    print_with_prefix(minimal, &line);
+}
+
+fn udp_probe_chunk(hosts: &[IpAddr], port: u16, timeout: Duration) -> Vec<UdpHostStatus> {
+    let payload = crate::udp::probe_payload(port);
+    let mut handles = Vec::with_capacity(hosts.len());
+    for &host in hosts {
+        let payload = payload.clone();
+        handles.push((
+            host,
+            thread::spawn(move || {
+                let addr = SocketAddr::new(host, port);
+                UdpHostStatus {
+                    host,
+                    outcome: udp_probe_once(addr, &payload, timeout),
+                }
+            }),
+        ));
+    }
+
+    handles
+        .into_iter()
+        .map(|(host, handle)| {
+            handle.join().unwrap_or(UdpHostStatus {
+                host,
+                outcome: ProbeOutcome::NoResponse,
+            })
+        })
+        .collect()
 }
 
 fn print_header(
@@ -788,4 +866,185 @@ pub fn perform_icmp_ipv6_subnet_scan(
 
     print_host_summary(hosts.len(), responsive_hosts.len(), minimal);
     print_statistics("ICMP subnet", total_attempts, successes, &times);
+}
+
+pub fn perform_udp_subnet_scan(
+    subnet: Ipv4Subnet,
+    port: u16,
+    timeout_ms: u64,
+    attempts_per_host: usize,
+    minimal: bool,
+) {
+    let host_count = subnet.host_count();
+    if host_count == 0 {
+        let message = format!(
+            "{} has no usable host addresses",
+            subnet.notation().yellow()
+        );
+        print_with_prefix(minimal, &message);
+        return;
+    }
+
+    let hosts: Vec<IpAddr> = subnet.iter_hosts().map(IpAddr::V4).collect();
+    if hosts.is_empty() {
+        let message = format!(
+            "{} has no usable host addresses",
+            subnet.notation().yellow()
+        );
+        print_with_prefix(minimal, &message);
+        return;
+    }
+
+    let subnet_notation = subnet.notation();
+    let attempts = ensure_attempts(attempts_per_host);
+    print_header(
+        "UDP",
+        &subnet_notation,
+        host_count,
+        Some(port),
+        attempts,
+        minimal,
+    );
+
+    let timeout = Duration::from_millis(timeout_ms);
+    let chunk_size = hosts.len().min(DEFAULT_SUBNET_BATCH);
+    let mut times = VecDeque::new();
+    let mut successes = 0usize;
+    let mut responsive_hosts: HashSet<IpAddr> = HashSet::new();
+
+    for attempt_idx in 0..attempts {
+        for chunk in hosts.chunks(chunk_size) {
+            let results = udp_probe_chunk(chunk, port, timeout);
+            if !minimal {
+                print_udp_chunk_row(&results, minimal, attempt_idx + 1, attempts);
+            }
+
+            for status in &results {
+                if let ProbeOutcome::Open { rtt, .. } = status.outcome {
+                    successes += 1;
+                    responsive_hosts.insert(status.host);
+                    times.push_back(rtt.as_micros());
+                } else {
+                    times.push_back(0);
+                }
+            }
+        }
+    }
+
+    let total_attempts = hosts.len() * attempts;
+
+    if minimal {
+        let mut responsive_list: Vec<IpAddr> = responsive_hosts.iter().copied().collect();
+        responsive_list.sort_by_key(|ip| match ip {
+            IpAddr::V4(v4) => (0, u128::from(u32::from(*v4))),
+            IpAddr::V6(v6) => (1, u128::from(*v6)),
+        });
+        if !responsive_list.is_empty() {
+            let entries = responsive_list
+                .iter()
+                .map(|ip| ip.to_string().green())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let message = format!("[{entries}]");
+            print_with_prefix(minimal, &message);
+        }
+    }
+
+    print_host_summary(hosts.len(), responsive_hosts.len(), minimal);
+    print_statistics("UDP subnet", total_attempts, successes, &times);
+}
+
+pub fn perform_udp_ipv6_subnet_scan(
+    subnet: &Ipv6Subnet,
+    port: u16,
+    timeout_ms: u64,
+    attempts_per_host: usize,
+    minimal: bool,
+) {
+    let host_count = subnet.host_count();
+    if host_count == 0 {
+        let message = format!(
+            "{} has no usable host addresses",
+            subnet.notation().yellow()
+        );
+        print_with_prefix(minimal, &message);
+        return;
+    }
+
+    if host_count == u128::MAX {
+        let message = format!(
+            "{} has too many addresses to scan (max /112 supported)",
+            subnet.notation().yellow()
+        );
+        print_with_prefix(minimal, &message);
+        return;
+    }
+
+    let hosts: Vec<IpAddr> = subnet.iter_hosts().map(IpAddr::V6).collect();
+    if hosts.is_empty() {
+        let message = format!(
+            "{} has no usable host addresses",
+            subnet.notation().yellow()
+        );
+        print_with_prefix(minimal, &message);
+        return;
+    }
+
+    let subnet_notation = subnet.notation();
+    let attempts = ensure_attempts(attempts_per_host);
+    print_header(
+        "UDP",
+        &subnet_notation,
+        host_count,
+        Some(port),
+        attempts,
+        minimal,
+    );
+
+    let timeout = Duration::from_millis(timeout_ms);
+    let chunk_size = hosts.len().min(DEFAULT_SUBNET_BATCH);
+    let mut times = VecDeque::new();
+    let mut successes = 0usize;
+    let mut responsive_hosts: HashSet<IpAddr> = HashSet::new();
+
+    for attempt_idx in 0..attempts {
+        for chunk in hosts.chunks(chunk_size) {
+            let results = udp_probe_chunk(chunk, port, timeout);
+            if !minimal {
+                print_udp_chunk_row(&results, minimal, attempt_idx + 1, attempts);
+            }
+
+            for status in &results {
+                if let ProbeOutcome::Open { rtt, .. } = status.outcome {
+                    successes += 1;
+                    responsive_hosts.insert(status.host);
+                    times.push_back(rtt.as_micros());
+                } else {
+                    times.push_back(0);
+                }
+            }
+        }
+    }
+
+    let total_attempts = hosts.len() * attempts;
+
+    if minimal {
+        let mut responsive_list: Vec<IpAddr> = responsive_hosts.iter().copied().collect();
+        responsive_list.sort_by_key(|ip| match ip {
+            IpAddr::V4(v4) => (0, u128::from(u32::from(*v4))),
+            IpAddr::V6(v6) => (1, u128::from(*v6)),
+        });
+        if !responsive_list.is_empty() {
+            let entries = responsive_list
+                .iter()
+                .map(|ip| ip.to_string().green())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let message = format!("[{entries}]");
+            print_with_prefix(minimal, &message);
+        }
+    }
+
+    print_host_summary(hosts.len(), responsive_hosts.len(), minimal);
+    print_statistics("UDP subnet", total_attempts, successes, &times);
 }

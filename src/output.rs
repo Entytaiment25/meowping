@@ -77,7 +77,9 @@ pub fn print_help() {
     );
     println!("\n{}:", "Options".bright_blue());
     println!("    -h, --help                Prints the Help Menu");
-    println!("    -p, --port <port>         Set the port number (default: ICMP, with: TCP)");
+    println!(
+        "    -p, --port <port(s)>     Port to probe (default: ICMP). Accepts a single port, a comma list (53,80,443), or a range (20-25)"
+    );
     println!(
         "    -t, --timeout <timeout>   Set the timeout for each connection attempt in milliseconds (default: 1000ms)"
     );
@@ -86,6 +88,7 @@ pub fn print_help() {
     );
     println!("    -m, --minimal             Changes the Prints to be more Minimal");
     println!("    -s, --http              Check if the destination URL is online via HTTP/S");
+    println!("    -u, --udp              Probe a UDP port instead of using TCP (requires -p)");
     println!("    -a, --no-asn            Disable ASN/organization lookups (use static data)");
     println!(
         "    -C, --config [path]     Load settings from a config file (default: meowping.conf next to the executable)"
@@ -101,6 +104,17 @@ pub fn print_help() {
     println!("\n  {}:", "TCP Port Check".yellow());
     println!("    {name} example.com -p 443");
     println!("    {name} 192.168.1.1 -p 22 -t 2000");
+
+    println!("\n  {}:", "UDP Port Probe".yellow());
+    println!("    {name} 1.1.1.1 -p 53 -u");
+    println!("    {name} time.google.com -p 123 -u -c 3");
+
+    println!("\n  {}:", "Multi-Port Probe".yellow());
+    println!("    {name} 1.1.1.1 -p 53,80,443");
+    println!("    {name} example.com -p 22,80,443,8080");
+    println!("    {name} 192.168.1.1 -p 20-25");
+    println!("    {name} 1.1.1.1 -p 53,80,443 -u");
+    println!("    {name} 192.168.1.0/28 -p 80,443");
 
     println!("\n  {}:", "HTTP/HTTPS Check".yellow());
     println!("    {name} https://example.com -s");
@@ -125,6 +139,9 @@ pub fn print_help() {
     println!("    • Subnet scans default to 1 attempt per host unless -c is specified");
     println!("    • Multi-ping supports mixing hostnames and IP addresses");
     println!("    • ICMP may require elevated privileges on some systems");
+    println!(
+        "    • UDP probes need no privileges: a response means open, 'Port Unreachable' means closed, and silence is reported as open|filtered"
+    );
 }
 
 pub fn print_welcome() {

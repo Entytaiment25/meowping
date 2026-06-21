@@ -309,4 +309,219 @@ if ! echo "$OUTPUT_IPV6_HELP" | grep -q "IPv6 Support"; then
     exit 1
 fi
 
+# ============================================================================
+# UDP Probe Tests
+# ============================================================================
+
+echo "Running UDP tests..."
+
+# UDP requires a port; running it without one must fail cleanly.
+OUTPUT_UDP_NOPORT=$($MEOWPING 1.1.1.1 -u 2>&1 || true)
+if ! echo "$OUTPUT_UDP_NOPORT" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "UDP probing requires a port"; then
+    echo "Test failed: Expected 'UDP probing requires a port' when --udp is given without -p"
+    echo "Actual output:"
+    echo "$OUTPUT_UDP_NOPORT"
+    exit 1
+fi
+
+# UDP help text
+OUTPUT_UDP_HELP=$($MEOWPING --help)
+if ! echo "$OUTPUT_UDP_HELP" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Probe a UDP port"; then
+    echo "Test failed: Expected UDP option in help text"
+    echo "Actual output:"
+    echo "$OUTPUT_UDP_HELP"
+    exit 1
+fi
+
+# A closed UDP port on loopback deterministically yields an ICMP Port
+# Unreachable, which the connected socket surfaces as "closed". This needs no
+# privileges or external network, so it is the reliable UDP verdict test.
+OUTPUT_UDP_CLOSED=$($MEOWPING 127.0.0.1 -p 9999 -u -c 1 -m -a)
+if ! echo "$OUTPUT_UDP_CLOSED" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "closed (Port Unreachable)"; then
+    echo "Test failed: Expected 'closed (Port Unreachable)' for loopback UDP closed port"
+    echo "Actual output:"
+    echo "$OUTPUT_UDP_CLOSED"
+    exit 1
+fi
+if ! echo "$OUTPUT_UDP_CLOSED" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "protocol=UDP"; then
+    echo "Test failed: Expected 'protocol=UDP' in loopback UDP closed output"
+    echo "Actual output:"
+    echo "$OUTPUT_UDP_CLOSED"
+    exit 1
+fi
+
+# IPv6 loopback closed port should report the same closed verdict.
+OUTPUT_UDP_V6_CLOSED=$($MEOWPING ::1 -p 9999 -u -c 1 -m -a)
+if ! echo "$OUTPUT_UDP_V6_CLOSED" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "closed (Port Unreachable)"; then
+    echo "Test failed: Expected 'closed (Port Unreachable)' for IPv6 loopback UDP closed port"
+    echo "Actual output:"
+    echo "$OUTPUT_UDP_V6_CLOSED"
+    exit 1
+fi
+
+# External UDP: an open DNS resolver answers our query, confirming "open".
+# Skipped when outbound UDP appears unavailable (e.g. restricted CI runners).
+HAVE_EXT_UDP=false
+EXT_UDP_TEST=$($MEOWPING 1.1.1.1 -p 53 -u -c 1 -m -a 2>&1 || true)
+if echo "$EXT_UDP_TEST" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "protocol=UDP"; then
+    HAVE_EXT_UDP=true
+fi
+
+if [[ "$HAVE_EXT_UDP" == "true" ]]; then
+    OUTPUT_UDP_OPEN=$($MEOWPING 1.1.1.1 -p 53 -u -c 1 -m -a)
+    if ! echo "$OUTPUT_UDP_OPEN" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "protocol=UDP"; then
+        echo "Test failed: Expected 'protocol=UDP' in open DNS UDP output"
+        echo "Actual output:"
+        echo "$OUTPUT_UDP_OPEN"
+        exit 1
+    fi
+    if ! echo "$OUTPUT_UDP_OPEN" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "port=53"; then
+        echo "Test failed: Expected 'port=53' in open DNS UDP output"
+        echo "Actual output:"
+        echo "$OUTPUT_UDP_OPEN"
+        exit 1
+    fi
+
+    # Multi-host UDP minimal mode should report both resolvers responsive.
+    OUTPUT_UDP_MULTI=$($MEOWPING 1.1.1.1,8.8.8.8 -p 53 -u -c 1 -m -a)
+    if ! echo "$OUTPUT_UDP_MULTI" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Hosts responsive: 2/2"; then
+        echo "Test failed: Expected 'Hosts responsive: 2/2' in multi-host UDP minimal output"
+        echo "Actual output:"
+        echo "$OUTPUT_UDP_MULTI"
+        exit 1
+    fi
+else
+    echo "Skipping external/multi-host UDP tests (outbound UDP to 1.1.1.1:53 unavailable)"
+fi
+
+# UDP subnet scan header on loopback (no privileges, no external network).
+OUTPUT_UDP_SUBNET=$($MEOWPING 127.0.0.0/30 -p 53 -u -c 1 -m -a)
+if ! echo "$OUTPUT_UDP_SUBNET" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "via UDP"; then
+    echo "Test failed: Expected 'via UDP' in UDP subnet scan output"
+    echo "Actual output:"
+    echo "$OUTPUT_UDP_SUBNET"
+    exit 1
+fi
+if ! echo "$OUTPUT_UDP_SUBNET" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Hosts responsive:"; then
+    echo "Test failed: Expected 'Hosts responsive:' in UDP subnet scan output"
+    echo "Actual output:"
+    echo "$OUTPUT_UDP_SUBNET"
+    exit 1
+fi
+
+# ============================================================================
+# Multi-Port Probe Tests
+# ============================================================================
+
+echo "Running multi-port tests..."
+
+# Help text documents the unified port flag and its list/range syntax.
+OUTPUT_MP_HELP=$($MEOWPING --help)
+if ! echo "$OUTPUT_MP_HELP" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "comma list"; then
+    echo "Test failed: Expected 'comma list' in -p/--port help text"
+    echo "Actual output:"
+    echo "$OUTPUT_MP_HELP"
+    exit 1
+fi
+
+# Reversed range is rejected.
+OUTPUT_MP_REVERSED=$($MEOWPING 1.1.1.1 -p 90-80 2>&1 || true)
+if ! echo "$OUTPUT_MP_REVERSED" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Port range end before start"; then
+    echo "Test failed: Expected 'Port range end before start' for reversed range"
+    echo "Actual output:"
+    echo "$OUTPUT_MP_REVERSED"
+    exit 1
+fi
+
+# Out-of-range port is rejected.
+OUTPUT_MP_OOR=$($MEOWPING 1.1.1.1 -p 99999 2>&1 || true)
+if ! echo "$OUTPUT_MP_OOR" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Port out of range"; then
+    echo "Test failed: Expected 'Port out of range' for port 99999"
+    echo "Actual output:"
+    echo "$OUTPUT_MP_OOR"
+    exit 1
+fi
+
+# Subnet x ports matrix above the cap is rejected.
+OUTPUT_MP_MATRIX=$($MEOWPING 192.168.1.0/24 -p 1-200 2>&1 || true)
+if ! echo "$OUTPUT_MP_MATRIX" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "matrix too large"; then
+    echo "Test failed: Expected 'matrix too large' for oversized subnet x ports"
+    echo "Actual output:"
+    echo "$OUTPUT_MP_MATRIX"
+    exit 1
+fi
+
+# Subnet x ports header on loopback (no privileges, no external network).
+OUTPUT_MP_SUBNET=$($MEOWPING 127.0.0.0/30 -p 53,443 -c 1 -m -a)
+if ! echo "$OUTPUT_MP_SUBNET" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "x 2 ports via TCP"; then
+    echo "Test failed: Expected 'x 2 ports via TCP' in multi-port subnet output"
+    echo "Actual output:"
+    echo "$OUTPUT_MP_SUBNET"
+    exit 1
+fi
+if ! echo "$OUTPUT_MP_SUBNET" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Ports responsive:"; then
+    echo "Test failed: Expected 'Ports responsive:' in multi-port subnet output"
+    echo "Actual output:"
+    echo "$OUTPUT_MP_SUBNET"
+    exit 1
+fi
+
+# External multi-port: needs outbound to 1.1.1.1. Skipped otherwise.
+HAVE_EXT_MP=false
+EXT_MP_TEST=$($MEOWPING 1.1.1.1 -p 53,80,443 -c 1 -m -a 2>&1 || true)
+if echo "$EXT_MP_TEST" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "protocol=TCP"; then
+    HAVE_EXT_MP=true
+fi
+
+if [[ "$HAVE_EXT_MP" == "true" ]]; then
+    # Range expansion: 80-82 yields three ports, header reports 3.
+    OUTPUT_MP_RANGE=$($MEOWPING 1.1.1.1 -p 80-82 -c 1 -m -a)
+    if ! echo "$OUTPUT_MP_RANGE" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "x 3 port(s) via TCP"; then
+        echo "Test failed: Expected 'x 3 port(s) via TCP' for range 80-82"
+        echo "Actual output:"
+        echo "$OUTPUT_MP_RANGE"
+        exit 1
+    fi
+    # Comma list header reports the port count.
+    OUTPUT_MP_LIST=$($MEOWPING 1.1.1.1 -p 53,80,443 -c 1 -m -a)
+    if ! echo "$OUTPUT_MP_LIST" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Ports responsive:"; then
+        echo "Test failed: Expected 'Ports responsive:' in multi-port list output"
+        echo "Actual output:"
+        echo "$OUTPUT_MP_LIST"
+        exit 1
+    fi
+    if ! echo "$OUTPUT_MP_LIST" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "1.1.1.1:443"; then
+        echo "Test failed: Expected '1.1.1.1:443' line in multi-port output"
+        echo "Actual output:"
+        echo "$OUTPUT_MP_LIST"
+        exit 1
+    fi
+    # TCP multiport must use 'timed out' for a non-responding port, not the UDP
+    # 'open|filtered' wording. Mix an open port (53) with one that times out (23)
+    # so the verdict goes through the multiport formatter.
+    OUTPUT_MP_TCPTO=$($MEOWPING 1.1.1.1 -p 53,23 -c 1 -t 1000 -m -a)
+    if ! echo "$OUTPUT_MP_TCPTO" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "1.1.1.1:23 timed out"; then
+        echo "Test failed: Expected '1.1.1.1:23 timed out' for TCP non-responding port"
+        echo "Actual output:"
+        echo "$OUTPUT_MP_TCPTO"
+        exit 1
+    fi
+    if echo "$OUTPUT_MP_TCPTO" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "open|filtered"; then
+        echo "Test failed: TCP multiport output must not use UDP 'open|filtered' wording"
+        echo "Actual output:"
+        echo "$OUTPUT_MP_TCPTO"
+        exit 1
+    fi
+    # Multi-host x multi-port matrix.
+    OUTPUT_MP_MULTIHOST=$($MEOWPING 1.1.1.1,8.8.8.8 -p 53,443 -c 1 -m -a)
+    if ! echo "$OUTPUT_MP_MULTIHOST" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "2 host(s) x 2 port(s)"; then
+        echo "Test failed: Expected '2 host(s) x 2 port(s)' in multi-host multi-port output"
+        echo "Actual output:"
+        echo "$OUTPUT_MP_MULTIHOST"
+        exit 1
+    fi
+else
+    echo "Skipping external multi-port tests (outbound to 1.1.1.1 unavailable)"
+fi
+
 echo "All feature tests passed."
