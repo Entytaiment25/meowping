@@ -1,61 +1,68 @@
 name: Rust
 
 on:
-  push:
-    paths:
-      - "src/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "build.rs"
-      - ".ci/**"
-      - ".cargo/config.toml"
-      - "rust-toolchain.toml"
-      - ".github/workflows/rust.yml"
-  pull_request:
-    paths:
-      - "src/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "build.rs"
-      - ".ci/**"
-      - ".cargo/config.toml"
-      - "rust-toolchain.toml"
-      - ".github/workflows/rust.yml"
+ push:
+  paths:
+   - "src/**"
+   - "Cargo.toml"
+   - "Cargo.lock"
+   - "build.rs"
+   - ".ci/**"
+   - ".cargo/config.toml"
+   - "rust-toolchain.toml"
+   - ".github/workflows/rust.yml"
+ pull_request:
+  paths:
+   - "src/**"
+   - "Cargo.toml"
+   - "Cargo.lock"
+   - "build.rs"
+   - ".ci/**"
+   - ".cargo/config.toml"
+   - "rust-toolchain.toml"
+   - ".github/workflows/rust.yml"
 
 permissions:
-  contents: read
+ contents: read
 
 env:
-  CARGO_TERM_COLOR: always
+ CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-          - os: windows-latest
-            target: x86_64-pc-windows-gnu
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - os: macos-latest
-            target: x86_64-apple-darwin
-          - os: macos-latest
-            target: aarch64-apple-darwin
+ build:
+  strategy:
+   matrix:
+    include:
+     - os: ubuntu-latest
+       target: aarch64-unknown-linux-gnu
+     - os: windows-latest
+       target: x86_64-pc-windows-gnu
+     - os: windows-latest
+       target: x86_64-pc-windows-msvc
+     - os: ubuntu-latest
+       target: x86_64-unknown-linux-gnu
+     - os: macos-latest
+       target: x86_64-apple-darwin
+     - os: macos-latest
+       target: aarch64-apple-darwin
 
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          targets: ${{ matrix.target }}
-          components: rust-src
-      - name: Build
-        run: cargo build --release --verbose
-      - name: Run tests
-        run: cargo test --verbose
-      - name: Run feature tests
-        run: ./.ci/feature-tests.sh
+  runs-on: ${{ matrix.os }}
+  steps:
+   - uses: actions/checkout@v4
+   - uses: dtolnay/rust-toolchain@nightly
+     with:
+      targets: ${{ matrix.target }}
+      components: rust-src
+   - if: matrix.target == 'x86_64-pc-windows-gnu'
+     shell: bash
+     run: |
+      rustup toolchain install nightly-x86_64-pc-windows-gnu \
+        --component rust-src --profile minimal
+      rustup default nightly-x86_64-pc-windows-gnu
+      echo "C:\msys64\mingw64\bin" >> "$GITHUB_PATH"
+   - name: Build
+     run: cargo build --release --verbose
+   - name: Run tests
+     run: cargo test --verbose
+   - name: Run feature tests
+     run: ./.ci/feature-tests.sh
