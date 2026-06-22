@@ -13,18 +13,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-          - os: windows-latest
-            target: x86_64-pc-windows-gnu
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
+          # Native builds: the runner arch matches the target arch, so no
+          # cross-linker is required.
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-          - os: macos-latest
-            target: x86_64-apple-darwin
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
           - os: macos-latest
             target: aarch64-apple-darwin
+          # macOS arm64 runner cross-links x86_64 via the Xcode toolchain.
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          # windows-gnu needs MinGW's windres.exe (build.rs resource compile).
+          # MSYS2 is preinstalled on windows-latest but not on PATH, so the
+          # job below prepends C:\msys64\mingw64\bin.
+          - os: windows-latest
+            target: x86_64-pc-windows-gnu
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -33,26 +39,28 @@ jobs:
         with:
           targets: ${{ matrix.target }}
           components: rust-src
-      - if: matrix.os == 'windows-latest'
+
+      # Make MinGW's windres.exe (and mingw-gcc fallback linker) discoverable
+      # for the windows-gnu resource-compile step in build.rs.
+      - if: matrix.target == 'x86_64-pc-windows-gnu'
         shell: bash
-        run: |
-          echo "OPENSSL_DIR=C:\Program Files\OpenSSL" >> $GITHUB_ENV
+        run: echo "C:\msys64\mingw64\bin" >> "$GITHUB_PATH"
 
       - name: Build binary and create archive
         shell: bash
         run: |
-          cargo build --verbose --release
+          cargo build --verbose --release --target ${{ matrix.target }}
           archive="meowping-${{ github.event.release.tag_name }}-${{ matrix.target }}"
-          cd target/release
+          cd target/${{ matrix.target }}/release
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             asset="$archive.zip"
-            7z a "../../$asset" "meowping.exe"
+            7z a "../../../$asset" "meowping.exe"
           else
             asset="$archive.tar.gz"
-            tar czf "../../$asset" "meowping"
+            tar czf "../../../$asset" "meowping"
           fi
-          cd ../..
-          echo "ASSET=$asset" >> $GITHUB_ENV
+          cd ../../..
+          echo "ASSET=$asset" >> "$GITHUB_ENV"
 
       - name: Upload archive
         env:

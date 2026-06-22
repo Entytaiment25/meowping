@@ -8,6 +8,8 @@ on:
       - "Cargo.lock"
       - "build.rs"
       - ".ci/**"
+      - ".cargo/config.toml"
+      - "rust-toolchain.toml"
       - ".github/workflows/rust.yml"
   pull_request:
     paths:
@@ -16,6 +18,8 @@ on:
       - "Cargo.lock"
       - "build.rs"
       - ".ci/**"
+      - ".cargo/config.toml"
+      - "rust-toolchain.toml"
       - ".github/workflows/rust.yml"
 
 permissions:
@@ -49,12 +53,8 @@ jobs:
         with:
           targets: ${{ matrix.target }}
           components: rust-src
-      - if: matrix.os == 'windows-latest'
-        shell: bash
-        run: |
-          echo "OPENSSL_DIR=C:\Program Files\OpenSSL" >> $GITHUB_ENV
       - name: Build
-        run: cargo install --verbose --path .
+        run: cargo build --release --verbose
       - name: Run tests
         run: cargo test --verbose
       - name: Run feature tests
