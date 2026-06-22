@@ -108,12 +108,16 @@ Accept-Language: en-US,en;q=0.9
 
 **For Linux users to get ICMP working.**
 
-```powershell
+```bash
 sudo setcap cap_net_raw+ep ./meowping
 ```
-
-**For macOS Users**
 **Installation**
+
+**For Anyone via Cargo**
+```bash
+cargo install meowping
+```
+**For macOS Users via Homebrew**
 ```bash
 brew tap Entytaiment25/meowping
 brew install meowping
