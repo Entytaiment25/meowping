@@ -111,7 +111,7 @@ Accept-Language: en-US,en;q=0.9
 ```bash
 sudo setcap cap_net_raw+ep ./meowping
 ```
-**Installation**
+## Installation
 
 **For Anyone via Cargo**
 ```bash
