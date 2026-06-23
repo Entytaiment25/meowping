@@ -121,7 +121,6 @@ fn handle_ipv6_subnet_scan(
 
 #[inline(never)]
 fn resolve_destination(dest: &str, minimal: bool) -> Option<String> {
-    // Handle bracketed IPv6 addresses like [::1]
     let clean = if dest.starts_with('[') && dest.ends_with(']') {
         &dest[1..dest.len() - 1]
     } else {

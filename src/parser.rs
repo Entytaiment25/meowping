@@ -28,7 +28,6 @@ impl Parser {
         let mut port = None;
 
         if host_port.starts_with('[') {
-            // IPv6 bracketed notation: [::1]:port or [::1]
             if let Some(bracket_end) = host_port.find(']') {
                 host = &host_port[1..bracket_end];
                 let after = &host_port[bracket_end + 1..];

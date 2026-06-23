@@ -2,10 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub struct Config {
-    // [settings]
     pub minimal: Option<bool>,
     pub no_asn: Option<bool>,
-    // [headers]
     pub http_headers: Vec<String>,
 }
 
@@ -24,21 +22,6 @@ impl Config {
             .join("meowping.conf")
     }
 
-    /// Parses a .conf file with optional INI-style sections.
-    ///
-    /// ```text
-    /// [settings]
-    /// minimal = true
-    /// no_asn  = false
-    ///
-    /// [headers]
-    /// User-Agent: curl/8.0
-    /// Accept: */*
-    /// ```
-    ///
-    /// Lines before any section header, or under `[headers]`, are treated as
-    /// raw HTTP header lines (`Name: value`). Lines under `[settings]` are
-    /// `key = value` pairs. Blank lines and `#` comments are ignored.
     pub fn load(path: &Path) -> Result<Self, String> {
         let content = fs::read_to_string(path)
             .map_err(|e| format!("Failed to read config file '{}': {}", path.display(), e))?;

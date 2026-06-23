@@ -178,7 +178,6 @@ impl Ipv6Subnet {
     pub fn host_count(&self) -> u128 {
         let host_bits = 128u32.saturating_sub(u32::from(self.prefix));
         if host_bits >= 64 {
-            // Too many hosts to reasonably scan
             return u128::MAX;
         }
         let total_addresses = 1u128 << host_bits;
@@ -195,7 +194,6 @@ impl Ipv6Subnet {
     pub fn iter_hosts(&self) -> Ipv6SubnetHostIter {
         let host_bits = 128u32.saturating_sub(u32::from(self.prefix));
 
-        // Limit scanning to reasonable subnet sizes (max /112 = 65536 addresses)
         if host_bits > 16 {
             return Ipv6SubnetHostIter::empty();
         }

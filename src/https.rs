@@ -11,9 +11,6 @@ const DEFAULT_HEADERS: &[&str] = &[
     "Accept-Language: en-US,en;q=0.9",
 ];
 
-/// Builds an HTTP/1.1 GET request. `Host` and `Connection: close` are always
-/// added by this function. If `extra_headers` is empty the built-in defaults
-/// are used; otherwise `extra_headers` replace them entirely.
 fn build_request(host: &str, path: &str, extra_headers: &[String]) -> String {
     let mut req = format!("GET {path} HTTP/1.1\r\nHost: {host}\r\n");
     let headers: &[_] = if extra_headers.is_empty() {
