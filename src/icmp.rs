@@ -45,17 +45,31 @@ mod platform {
 
     fn icmp_checksum(data: &[u8]) -> u16 {
         let mut sum: u32 = 0;
-        let mut chunks = data.chunks_exact(2);
-        for ch in &mut chunks {
+        let (chunks, remainder) = data.as_chunks::<2>();
+        for ch in chunks {
             sum += u32::from(u16::from_be_bytes([ch[0], ch[1]]));
         }
-        if let Some(&rem) = chunks.remainder().first() {
+        if let Some(&rem) = remainder.first() {
             sum += u32::from(u16::from_be_bytes([rem, 0]));
         }
         while (sum >> 16) != 0 {
             sum = (sum & 0xffff) + (sum >> 16);
         }
         !u16::try_from(sum).expect("ICMP checksum fold must fit into u16")
+    }
+
+    fn setsockopt_raw(
+        fd: RawFd,
+        level: libc::c_int,
+        name: libc::c_int,
+        val: *const libc::c_void,
+        len: libc::socklen_t,
+    ) -> io::Result<()> {
+        let ret = unsafe { libc::setsockopt(fd, level, name, val, len) };
+        if ret == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
     }
 
     fn set_recv_timeout(fd: RawFd, timeout: Duration) -> io::Result<()> {
@@ -65,53 +79,41 @@ mod platform {
             tv_usec: libc::suseconds_t::try_from(timeout.subsec_micros())
                 .map_err(|_| io::Error::other("timeout micros overflow suseconds_t"))?,
         };
-        let ret = unsafe {
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_RCVTIMEO,
-                (&raw const tv).cast::<libc::c_void>(),
-                socklen_of::<libc::timeval>()?,
-            )
-        };
-        if ret == -1 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(())
+        setsockopt_raw(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_RCVTIMEO,
+            (&raw const tv).cast::<libc::c_void>(),
+            socklen_of::<libc::timeval>()?,
+        )
+    }
+
+    fn setsockopt_int(
+        fd: RawFd,
+        level: libc::c_int,
+        name: libc::c_int,
+        val: libc::c_int,
+    ) -> io::Result<()> {
+        setsockopt_raw(
+            fd,
+            level,
+            name,
+            (&raw const val).cast::<libc::c_void>(),
+            socklen_of::<libc::c_int>()?,
+        )
     }
 
     fn set_ttl(fd: RawFd, ttl: u8) -> io::Result<()> {
-        let ttl_val: libc::c_int = libc::c_int::from(ttl);
-        let ret = unsafe {
-            libc::setsockopt(
-                fd,
-                libc::IPPROTO_IP,
-                libc::IP_TTL,
-                (&raw const ttl_val).cast::<libc::c_void>(),
-                socklen_of::<libc::c_int>()?,
-            )
-        };
-        if ret == -1 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(())
+        setsockopt_int(fd, libc::IPPROTO_IP, libc::IP_TTL, libc::c_int::from(ttl))
     }
 
     fn set_ttl_v6(fd: RawFd, ttl: u8) -> io::Result<()> {
-        let ttl_val: libc::c_int = libc::c_int::from(ttl);
-        let ret = unsafe {
-            libc::setsockopt(
-                fd,
-                libc::IPPROTO_IPV6,
-                libc::IPV6_UNICAST_HOPS,
-                (&raw const ttl_val).cast::<libc::c_void>(),
-                socklen_of::<libc::c_int>()?,
-            )
-        };
-        if ret == -1 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(())
+        setsockopt_int(
+            fd,
+            libc::IPPROTO_IPV6,
+            libc::IPV6_UNICAST_HOPS,
+            libc::c_int::from(ttl),
+        )
     }
 
     struct FdGuard {

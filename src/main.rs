@@ -63,59 +63,56 @@ fn handle_http_check(
     }
 }
 
-#[inline(never)]
-fn handle_subnet_scan(
-    subnet: Ipv4Subnet,
-    port: Option<u16>,
-    udp: bool,
-    timeout: u64,
-    per_host_attempts: usize,
-    minimal: bool,
-) {
-    if let Some(p) = port {
-        if udp {
-            perform_udp_subnet_scan(subnet, p, timeout, per_host_attempts, minimal);
-        } else {
-            perform_tcp_subnet_scan(subnet, p, timeout, per_host_attempts, minimal);
-        }
-    } else {
-        perform_icmp_subnet_scan(
-            subnet,
-            timeout,
-            DEFAULT_TTL,
-            DEFAULT_IDENT,
-            per_host_attempts,
-            &DEFAULT_ICMP_PAYLOAD,
-            minimal,
-        );
-    }
+enum SubnetRef<'a> {
+    V4(Ipv4Subnet),
+    V6(&'a Ipv6Subnet),
 }
 
 #[inline(never)]
-fn handle_ipv6_subnet_scan(
-    subnet: &Ipv6Subnet,
+fn handle_subnet_scan(
+    subnet: SubnetRef<'_>,
     port: Option<u16>,
     udp: bool,
     timeout: u64,
     per_host_attempts: usize,
     minimal: bool,
 ) {
-    if let Some(p) = port {
-        if udp {
-            perform_udp_ipv6_subnet_scan(subnet, p, timeout, per_host_attempts, minimal);
-        } else {
-            perform_tcp_ipv6_subnet_scan(subnet, p, timeout, per_host_attempts, minimal);
+    let Some(p) = port else {
+        return match subnet {
+            SubnetRef::V4(s) => perform_icmp_subnet_scan(
+                s,
+                timeout,
+                DEFAULT_TTL,
+                DEFAULT_IDENT,
+                per_host_attempts,
+                &DEFAULT_ICMP_PAYLOAD,
+                minimal,
+            ),
+            SubnetRef::V6(s) => perform_icmp_ipv6_subnet_scan(
+                s,
+                timeout,
+                DEFAULT_TTL,
+                DEFAULT_IDENT,
+                per_host_attempts,
+                &DEFAULT_ICMP_PAYLOAD,
+                minimal,
+            ),
+        };
+    };
+
+    match (subnet, udp) {
+        (SubnetRef::V4(s), true) => {
+            perform_udp_subnet_scan(s, p, timeout, per_host_attempts, minimal);
         }
-    } else {
-        perform_icmp_ipv6_subnet_scan(
-            subnet,
-            timeout,
-            DEFAULT_TTL,
-            DEFAULT_IDENT,
-            per_host_attempts,
-            &DEFAULT_ICMP_PAYLOAD,
-            minimal,
-        );
+        (SubnetRef::V4(s), false) => {
+            perform_tcp_subnet_scan(s, p, timeout, per_host_attempts, minimal);
+        }
+        (SubnetRef::V6(s), true) => {
+            perform_udp_ipv6_subnet_scan(s, p, timeout, per_host_attempts, minimal);
+        }
+        (SubnetRef::V6(s), false) => {
+            perform_tcp_ipv6_subnet_scan(s, p, timeout, per_host_attempts, minimal);
+        }
     }
 }
 
@@ -291,6 +288,7 @@ fn handle_multiport_subnet(ctx: &ProbeCtx<'_>, port_list: &[u16]) -> Result<bool
             ctx.timeout,
             ctx.per_host_attempts,
             ctx.minimal,
+            ctx.no_asn,
         );
         return Ok(true);
     }
@@ -319,6 +317,7 @@ fn handle_multiport_subnet(ctx: &ProbeCtx<'_>, port_list: &[u16]) -> Result<bool
             ctx.timeout,
             ctx.per_host_attempts,
             ctx.minimal,
+            ctx.no_asn,
         );
         return Ok(true);
     }
@@ -328,18 +327,18 @@ fn handle_multiport_subnet(ctx: &ProbeCtx<'_>, port_list: &[u16]) -> Result<bool
 #[inline(never)]
 fn run_probe_dispatch(ctx: &ProbeCtx<'_>) -> Result<(), Box<dyn Error>> {
     match ctx.ports.as_deref() {
-        None => run_icmp_dispatch(ctx),
-        Some([p]) => run_single_port_dispatch(ctx, *p),
+        None => run_host_dispatch(ctx, None),
+        Some([p]) => run_host_dispatch(ctx, Some(*p)),
         Some(port_list) => run_multiport_dispatch(ctx, port_list),
     }
 }
 
 #[inline(never)]
-fn run_icmp_dispatch(ctx: &ProbeCtx<'_>) -> Result<(), Box<dyn Error>> {
+fn run_host_dispatch(ctx: &ProbeCtx<'_>, port: Option<u16>) -> Result<(), Box<dyn Error>> {
     if let Some(subnet) = ctx.subnet_target {
         handle_subnet_scan(
-            subnet,
-            None,
+            SubnetRef::V4(subnet),
+            port,
             ctx.udp,
             ctx.timeout,
             ctx.per_host_attempts,
@@ -348,38 +347,9 @@ fn run_icmp_dispatch(ctx: &ProbeCtx<'_>) -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     if let Some(ipv6_subnet) = ctx.ipv6_subnet_target {
-        handle_ipv6_subnet_scan(
-            &ipv6_subnet,
-            None,
-            ctx.udp,
-            ctx.timeout,
-            ctx.per_host_attempts,
-            ctx.minimal,
-        );
-        return Ok(());
-    }
-    if ctx.is_multi {
-        handle_multi_icmp(ctx.destinations, ctx.timeout, ctx.count, ctx.minimal);
-    } else {
-        handle_single_destination(
-            ctx.destination_input,
-            None,
-            ctx.udp,
-            ctx.timeout,
-            ctx.count,
-            ctx.minimal,
-            ctx.no_asn,
-        )?;
-    }
-    Ok(())
-}
-
-#[inline(never)]
-fn run_single_port_dispatch(ctx: &ProbeCtx<'_>, p: u16) -> Result<(), Box<dyn Error>> {
-    if let Some(subnet) = ctx.subnet_target {
         handle_subnet_scan(
-            subnet,
-            Some(p),
+            SubnetRef::V6(&ipv6_subnet),
+            port,
             ctx.udp,
             ctx.timeout,
             ctx.per_host_attempts,
@@ -388,48 +358,55 @@ fn run_single_port_dispatch(ctx: &ProbeCtx<'_>, p: u16) -> Result<(), Box<dyn Er
         return Ok(());
     }
 
-    if let Some(ipv6_subnet) = ctx.ipv6_subnet_target {
-        handle_ipv6_subnet_scan(
-            &ipv6_subnet,
-            Some(p),
-            ctx.udp,
-            ctx.timeout,
-            ctx.per_host_attempts,
-            ctx.minimal,
-        );
-        return Ok(());
-    }
-
-    if ctx.is_multi {
-        if ctx.udp {
-            perform_udp_multi_scan(
-                ctx.destinations,
-                p,
-                ctx.timeout,
-                ctx.count,
-                ctx.minimal,
-                ctx.no_asn,
-            );
-        } else {
-            perform_tcp_multi_scan(
-                ctx.destinations,
-                p,
-                ctx.timeout,
-                ctx.count,
-                ctx.minimal,
-                ctx.no_asn,
-            );
+    match port {
+        None => {
+            if ctx.is_multi {
+                handle_multi_icmp(ctx.destinations, ctx.timeout, ctx.count, ctx.minimal);
+            } else {
+                handle_single_destination(
+                    ctx.destination_input,
+                    None,
+                    ctx.udp,
+                    ctx.timeout,
+                    ctx.count,
+                    ctx.minimal,
+                    ctx.no_asn,
+                )?;
+            }
         }
-    } else {
-        handle_single_destination(
-            ctx.destination_input,
-            Some(p),
-            ctx.udp,
-            ctx.timeout,
-            ctx.count,
-            ctx.minimal,
-            ctx.no_asn,
-        )?;
+        Some(p) => {
+            if ctx.is_multi {
+                if ctx.udp {
+                    perform_udp_multi_scan(
+                        ctx.destinations,
+                        p,
+                        ctx.timeout,
+                        ctx.count,
+                        ctx.minimal,
+                        ctx.no_asn,
+                    );
+                } else {
+                    perform_tcp_multi_scan(
+                        ctx.destinations,
+                        p,
+                        ctx.timeout,
+                        ctx.count,
+                        ctx.minimal,
+                        ctx.no_asn,
+                    );
+                }
+            } else {
+                handle_single_destination(
+                    ctx.destination_input,
+                    Some(p),
+                    ctx.udp,
+                    ctx.timeout,
+                    ctx.count,
+                    ctx.minimal,
+                    ctx.no_asn,
+                )?;
+            }
+        }
     }
     Ok(())
 }

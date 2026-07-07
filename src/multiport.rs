@@ -40,7 +40,7 @@ const fn verdict_from_udp(outcome: ProbeOutcome) -> PortVerdict {
 
 fn format_port_result(res: &PortResult, asn: &str, udp: bool, minimal: bool) -> String {
     let proto = if udp { "UDP" } else { "TCP" };
-    let show_asn = !minimal || asn != "no lookup";
+    let show_asn = !asn.is_empty();
     let prefix = if minimal {
         String::new()
     } else {
@@ -310,6 +310,7 @@ pub fn perform_multiport_hosts(
     aggregate(&all_results, ports, udp, minimal, proto_label);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn perform_multiport_subnet<I>(
     host_label: &str,
     hosts: I,
@@ -318,6 +319,7 @@ pub fn perform_multiport_subnet<I>(
     timeout_ms: u64,
     attempts: usize,
     minimal: bool,
+    no_asn: bool,
 ) where
     I: Iterator<Item = IpAddr>,
 {
@@ -329,14 +331,28 @@ pub fn perform_multiport_subnet<I>(
         return;
     }
 
+    let subnet_asn =
+        fetch_asn(&host_vec[0].to_string(), no_asn, timeout_ms).unwrap_or_else(|_| String::new());
+
     let proto_label = if udp { "UDP subnet" } else { "TCP subnet" };
-    let header = format!(
-        "Scanning {} ({} hosts) x {} ports via {}",
-        host_label.bright_blue(),
-        host_vec.len(),
-        ports.len(),
-        if udp { "UDP" } else { "TCP" }
-    );
+    let header = if subnet_asn.is_empty() || subnet_asn == "no lookup" {
+        format!(
+            "Scanning {} ({} hosts) x {} ports via {}",
+            host_label.bright_blue(),
+            host_vec.len(),
+            ports.len(),
+            if udp { "UDP" } else { "TCP" }
+        )
+    } else {
+        format!(
+            "Scanning {} ({} hosts) x {} ports via {} [{}]",
+            host_label.bright_blue(),
+            host_vec.len(),
+            ports.len(),
+            if udp { "UDP" } else { "TCP" },
+            subnet_asn.green()
+        )
+    };
     print_with_prefix(minimal, &header);
 
     let payloads = payloads_for(ports, udp);
@@ -363,7 +379,7 @@ pub fn perform_multiport_subnet<I>(
                     port: unit.port,
                     verdict,
                 };
-                let entry = format_port_result(&res, "no lookup", udp, minimal);
+                let entry = format_port_result(&res, "", udp, minimal);
                 if matches!(verdict, PortVerdict::Open { .. }) {
                     println!("{entry}");
                 }

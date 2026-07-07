@@ -74,34 +74,55 @@ fn read_response(mut stream: impl Read) -> Result<Vec<u8>, Box<dyn std::error::E
     stream.read_to_end(&mut response)?;
     Ok(response)
 }
-fn get_http_status(
+
+fn fetch_response(
     host: &str,
     port: u16,
     path: &str,
     timeout: u64,
     headers: &[String],
-) -> Result<u16, Box<dyn std::error::Error>> {
-    let mut stream = connect_tcp(host, port, timeout)?;
+    tls: bool,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let stream = connect_tcp(host, port, timeout)?;
     let request = build_request(host, path, headers);
-    stream.write_all(request.as_bytes())?;
-    let response = read_response(&mut stream)?;
-    parse_http_status(&response)
+    if tls {
+        let connector = TlsConnector::new()?;
+        let mut ssl_stream = connector.connect(host, stream)?;
+        ssl_stream.write_all(request.as_bytes())?;
+        read_response(&mut ssl_stream)
+    } else {
+        let mut stream = stream;
+        stream.write_all(request.as_bytes())?;
+        read_response(&mut stream)
+    }
 }
 
-fn get_https_status(
-    host: &str,
-    port: u16,
-    path: &str,
+fn is_https(url: &str, host: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    let https = url.starts_with("https://");
+    if https && (host == "localhost" || host == "127.0.0.1") {
+        return Err(
+            "Cannot establish HTTPS connection: Server only supports HTTP. Use http:// instead."
+                .into(),
+        );
+    }
+    Ok(https)
+}
+
+const fn default_port(https: bool) -> u16 {
+    if https { 443 } else { 80 }
+}
+
+fn fetch_url(
+    url: &str,
     timeout: u64,
     headers: &[String],
-) -> Result<u16, Box<dyn std::error::Error>> {
-    let stream = connect_tcp(host, port, timeout)?;
-    let connector = TlsConnector::new()?;
-    let mut ssl_stream = connector.connect(host, stream)?;
-    let request = build_request(host, path, headers);
-    ssl_stream.write_all(request.as_bytes())?;
-    let response = read_response(&mut ssl_stream)?;
-    parse_http_status(&response)
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let parsed_url = Parser::parse(url)?;
+    let host = &parsed_url.host;
+    let path = &parsed_url.path;
+    let https = is_https(url, host)?;
+    let port = parsed_url.port.unwrap_or_else(|| default_port(https));
+    fetch_response(host, port, path, timeout, headers, https)
 }
 
 pub fn get_status(
@@ -109,48 +130,9 @@ pub fn get_status(
     timeout: u64,
     headers: &[String],
 ) -> Result<u16, Box<dyn std::error::Error>> {
-    let parsed_url = Parser::parse(url)?;
-    let host = &parsed_url.host;
-    let path = &parsed_url.path;
-
-    if url.starts_with("https://") {
-        if host == "localhost" || host == "127.0.0.1" {
-            return Err(
-                "Cannot establish HTTPS connection: Server only supports HTTP. Use http:// instead.".into()
-            );
-        }
-        let port = parsed_url.port.unwrap_or(443);
-        get_https_status(host, port, path, timeout, headers)
-    } else {
-        let port = parsed_url.port.unwrap_or(80);
-        get_http_status(host, port, path, timeout, headers)
-    }
+    parse_http_status(&fetch_url(url, timeout, headers)?)
 }
 
 pub fn get(url: &str, timeout: u64) -> Result<String, Box<dyn std::error::Error>> {
-    let parsed_url = Parser::parse(url)?;
-    let host = &parsed_url.host;
-    let path = &parsed_url.path;
-
-    let response = if url.starts_with("https://") {
-        let port = parsed_url.port.unwrap_or(443);
-        let stream = connect_tcp(host, port, timeout)?;
-        let connector = TlsConnector::new()?;
-        let mut ssl_stream = connector.connect(host, stream)?;
-        let request = build_request(host, path, &[]);
-        ssl_stream.write_all(request.as_bytes())?;
-        let mut full_response = Vec::new();
-        ssl_stream.read_to_end(&mut full_response)?;
-        full_response
-    } else {
-        let port = parsed_url.port.unwrap_or(80);
-        let mut stream = connect_tcp(host, port, timeout)?;
-        let request = build_request(host, path, &[]);
-        stream.write_all(request.as_bytes())?;
-        let mut full_response = Vec::new();
-        stream.read_to_end(&mut full_response)?;
-        full_response
-    };
-
-    parse_http_body(&response)
+    parse_http_body(&fetch_url(url, timeout, &[])?)
 }
