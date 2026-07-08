@@ -10,13 +10,17 @@ fn main() {
 mod windows {
     use std::env;
     use std::fs;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
 
     use windres::Build;
 
     pub fn compile_resources_file() {
-        let out_dir = env::var_os("OUT_DIR").unwrap();
-        let resource_header = Path::new(&out_dir).join("versions.h");
+        println!("cargo:rerun-if-changed=resources.rc");
+        println!("cargo:rerun-if-env-changed=WINDRES");
+
+        let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+        let resource_header = out_dir.join("versions.h");
         let major = env!("CARGO_PKG_VERSION_MAJOR");
         let minor = env!("CARGO_PKG_VERSION_MINOR");
         let patch = env!("CARGO_PKG_VERSION_PATCH");
@@ -41,9 +45,37 @@ mod windows {
         )
         .unwrap();
 
-        Build::new()
-            .include(out_dir)
-            .compile("resources.rc")
-            .unwrap();
+        if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("gnu") {
+            compile_gnu_resources(&out_dir);
+        } else {
+            Build::new()
+                .include(&out_dir)
+                .compile("resources.rc")
+                .unwrap();
+        }
+    }
+
+    fn compile_gnu_resources(out_dir: &Path) {
+        let resource_object = out_dir.join("resources.o");
+        let windres = env::var_os("WINDRES").unwrap_or_else(|| "windres".into());
+
+        let status = Command::new(&windres)
+            .arg("-I")
+            .arg(out_dir)
+            .arg("-i")
+            .arg("resources.rc")
+            .arg("-o")
+            .arg(&resource_object)
+            .arg("-O")
+            .arg("coff")
+            .status()
+            .unwrap_or_else(|error| panic!("failed to execute {}: {error}", Path::new(&windres).display()));
+
+        assert!(
+            status.success(),
+            "windres failed while compiling resources.rc with status {status}; check the resource file syntax and toolchain setup"
+        );
+
+        println!("cargo:rustc-link-arg={}", resource_object.display());
     }
 }
