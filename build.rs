@@ -69,9 +69,12 @@ mod windows {
             .arg("-O")
             .arg("coff")
             .status()
-            .unwrap_or_else(|error| panic!("failed to run {}: {error}", Path::new(&windres).display()));
+            .unwrap_or_else(|error| panic!("failed to execute {}: {error}", Path::new(&windres).display()));
 
-        assert!(status.success(), "windres exited with {status}");
+        assert!(
+            status.success(),
+            "windres failed while compiling resources.rc with status {status}; check the resource file syntax and toolchain setup"
+        );
 
         println!("cargo:rustc-link-arg={}", resource_object.display());
     }
