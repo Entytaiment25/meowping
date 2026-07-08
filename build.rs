@@ -17,6 +17,7 @@ mod windows {
 
     pub fn compile_resources_file() {
         println!("cargo:rerun-if-changed=resources.rc");
+        println!("cargo:rerun-if-env-changed=WINDRES");
 
         let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
         let resource_header = out_dir.join("versions.h");
@@ -56,7 +57,7 @@ mod windows {
 
     fn compile_gnu_resources(out_dir: &Path) {
         let resource_object = out_dir.join("resources.o");
-        let windres = env::var_os("WINDRES").unwrap_or_else(|| "x86_64-w64-mingw32-windres".into());
+        let windres = env::var_os("WINDRES").unwrap_or_else(|| "windres".into());
 
         let status = Command::new(&windres)
             .arg("-I")
@@ -68,7 +69,7 @@ mod windows {
             .arg("-O")
             .arg("coff")
             .status()
-            .unwrap_or_else(|error| panic!("failed to run {:?}: {error}", windres));
+            .unwrap_or_else(|error| panic!("failed to run {}: {error}", Path::new(&windres).display()));
 
         assert!(status.success(), "windres exited with {status}");
 
