@@ -69,7 +69,12 @@ mod windows {
             .arg("-O")
             .arg("coff")
             .status()
-            .unwrap_or_else(|error| panic!("failed to execute {}: {error}", Path::new(&windres).display()));
+            .unwrap_or_else(|error| {
+                panic!(
+                    "failed to execute {}: {error}",
+                    Path::new(&windres).display()
+                )
+            });
 
         assert!(
             status.success(),

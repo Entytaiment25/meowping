@@ -2,12 +2,16 @@ use crate::colors::{Colorize, HyperLink};
 use std::collections::VecDeque;
 use std::time::Duration;
 
-pub fn print_with_prefix(minimal: bool, message: &str) {
+pub fn format_with_prefix(minimal: bool, message: &str) -> String {
     if minimal {
-        println!("{message}");
+        message.to_string()
     } else {
-        println!("{} {}", "[MEOWPING]".magenta(), message);
+        format!("{} {}", "[MEOWPING]".magenta(), message)
     }
+}
+
+pub fn print_with_prefix(minimal: bool, message: &str) {
+    println!("{}", format_with_prefix(minimal, message));
 }
 
 pub fn micros_to_ms(micros: u128) -> f64 {
@@ -89,6 +93,9 @@ pub fn print_help() {
     println!("    -m, --minimal             Changes the Prints to be more Minimal");
     println!("    -s, --http              Check if the destination URL is online via HTTP/S");
     println!("    -u, --udp              Probe a UDP port instead of using TCP (requires -p)");
+    println!(
+        "    -w, --watch             Continuously re-probe a subnet and live-update all host statuses (Ctrl+C to stop)"
+    );
     println!("    -a, --no-asn            Disable ASN/organization lookups (use static data)");
     println!(
         "    -C, --config [path]     Load settings from a config file (default: meowping.conf next to the executable)"
@@ -130,6 +137,8 @@ pub fn print_help() {
     println!("    {name} 192.168.1.0/24 -p 80");
     println!("    {name} 2001:db8::/120");
     println!("    {name} fe80::/112 -p 22");
+    println!("    {name} 192.168.1.0/24 -w");
+    println!("    {name} 192.168.1.0/24 -p 22 -w");
 
     println!("\n{}:", "IPv6 Support".bright_blue());
     println!("    MeowPing supports IPv6 addresses for all connection types (ICMP, TCP, HTTP)");
