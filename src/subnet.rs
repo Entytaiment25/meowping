@@ -206,8 +206,6 @@ impl Ipv6Subnet {
 
         let mask = if prefix == 0 {
             0
-        } else if prefix == 128 {
-            !0u128
         } else {
             (!0u128) << (128 - prefix)
         };
@@ -229,8 +227,6 @@ impl Ipv6Subnet {
 
         if self.prefix >= 127 {
             total_addresses
-        } else if total_addresses <= 2 {
-            0
         } else {
             total_addresses.saturating_sub(2)
         }
