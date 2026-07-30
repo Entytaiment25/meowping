@@ -37,6 +37,7 @@ OPTIONS:
     -t, --timeout <ms>      Set the timeout for each connection attempt in milliseconds (default: 1000ms)
     -c, --count <count>     Set the number of connection attempts (default: 65535)
     -m, --minimal           Changes the Prints to be more Minimal
+    -w, --watch             Continuously re-probe a subnet and live-update all host statuses (Ctrl+C to stop)
     -a, --no-asn            Disable ASN/organization lookups (use static data)
     -C, --config [path]     Load settings from a config file (default: meowping.conf next to the executable)
 ```
@@ -56,6 +57,10 @@ OPTIONS:
 
 # Subnet scan
 ./meowping 94.249.228.0/24 -p 22
+
+# Subnet scan, continuously re-probing and live-updating host statuses
+./meowping 192.168.1.0/24 -w
+./meowping 192.168.1.0/24 -p 22 -w
 ```
 
 ```powershell
