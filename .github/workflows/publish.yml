@@ -1,0 +1,24 @@
+name: Publish to crates.io
+
+on:
+ release:
+  types: [published]
+
+permissions:
+ contents: read
+ id-token: write
+
+jobs:
+ publish:
+  runs-on: ubuntu-latest
+  steps:
+   - uses: actions/checkout@v4
+   - uses: dtolnay/rust-toolchain@nightly
+     with:
+      components: rust-src
+   - uses: rust-lang/crates-io-auth-action@v1
+     id: auth
+   - name: Publish
+     run: cargo publish
+     env:
+      CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
