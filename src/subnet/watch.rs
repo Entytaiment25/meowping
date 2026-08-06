@@ -1,6 +1,10 @@
-use super::scan::{ScanConfig, ScanResult, format_scan_header, probe_chunk};
+use super::scan::{
+    ScanConfig, ScanResult, ensure_rounds, format_scan_header, print_host_summary,
+    print_responsive_minimal, probe_chunk,
+};
 use crate::colors::Colorize;
-use crate::output::format_with_prefix;
+use crate::output::{format_with_prefix, print_statistics};
+use std::collections::{HashSet, VecDeque};
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -26,7 +30,7 @@ fn watch_minimal_line(results: &[ScanResult]) -> String {
     format!("[{entries}]")
 }
 
-fn watch_pass_lines(results: &[ScanResult], pass: u64, minimal: bool) -> Vec<String> {
+fn watch_round_lines(results: &[ScanResult], round: u64, minimal: bool) -> Vec<String> {
     if minimal {
         return vec![watch_minimal_line(results)];
     }
@@ -34,7 +38,7 @@ fn watch_pass_lines(results: &[ScanResult], pass: u64, minimal: bool) -> Vec<Str
     let up = results.iter().filter(|r| r.is_responsive()).count();
     let mut lines = Vec::with_capacity(results.len().div_ceil(WATCH_HOSTS_PER_ROW) + 1);
     lines.push(format!(
-        "Pass {pass} - {}/{} up",
+        "Round {round} - {}/{} up",
         up.to_string().green(),
         results.len()
     ));
@@ -49,7 +53,7 @@ fn watch_pass_lines(results: &[ScanResult], pass: u64, minimal: bool) -> Vec<Str
     lines
 }
 
-const WATCH_MIN_PASS_INTERVAL: Duration = Duration::from_millis(150);
+const WATCH_MIN_ROUND_INTERVAL: Duration = Duration::from_millis(150);
 
 static WATCH_INTERRUPTED: AtomicBool = AtomicBool::new(false);
 
@@ -88,10 +92,16 @@ fn install_watch_interrupt_handler() {
 }
 
 pub(super) fn perform_subnet_watch(hosts: &[IpAddr], cfg: &ScanConfig) {
-    use std::io::Write as _;
+    use std::io::{IsTerminal as _, Write as _};
     use std::time::Instant;
 
     install_watch_interrupt_handler();
+
+    let max_rounds = cfg.rounds.map(ensure_rounds);
+    let suffix = max_rounds.map_or_else(
+        || "(refreshing continuously, Ctrl+C to stop)".to_string(),
+        |n| format!("({n} rounds)"),
+    );
 
     let header = format_scan_header(
         "Watching",
@@ -99,40 +109,80 @@ pub(super) fn perform_subnet_watch(hosts: &[IpAddr], cfg: &ScanConfig) {
         &cfg.notation,
         cfg.host_count,
         cfg.kind.header_port(),
-        Some("(refreshing continuously, Ctrl+C to stop)"),
+        Some(&suffix),
     );
     let header_line = format_with_prefix(cfg.minimal, &header);
+    let live_redraw = std::io::stdout().is_terminal();
 
-    // Alternate screen buffer + hidden cursor, like htop/watch: keeps every
-    // redrawn pass out of the shell's scrollback entirely instead of just
-    // visually overwriting rows that are still recorded in history.
-    print!("\x1b[?1049h\x1b[?25l");
+    if live_redraw {
+        print!("\x1b[?1049h\x1b[?25l");
+    } else {
+        println!("{header_line}");
+    }
 
     let mut seq: u16 = 1;
-    let mut pass: u64 = 0;
+    let mut round: u64 = 0;
+    let mut successes = 0usize;
+    let mut responsive_hosts: HashSet<IpAddr> = HashSet::new();
+    let mut times = VecDeque::new();
 
     while !WATCH_INTERRUPTED.load(Ordering::SeqCst) {
-        let pass_start = Instant::now();
-        pass += 1;
-        let results = probe_chunk(hosts, &cfg.kind, &mut seq);
-        let content_lines = watch_pass_lines(&results, pass, cfg.minimal);
-
-        println!("\x1b[H{header_line}");
-        for line in &content_lines {
-            println!("{line}");
+        if max_rounds.is_some_and(|limit| round >= u64::try_from(limit).unwrap_or(u64::MAX)) {
+            break;
         }
-        print!("\x1b[J");
-        let _ = std::io::stdout().flush();
+
+        let round_start = Instant::now();
+        round += 1;
+        let results = probe_chunk(hosts, &cfg.kind, &mut seq);
+
+        for status in &results {
+            if status.is_responsive() {
+                successes += 1;
+                responsive_hosts.insert(status.host);
+                times.push_back(status.latency_us().unwrap_or(0));
+            } else {
+                times.push_back(0);
+            }
+        }
+
+        let content_lines = watch_round_lines(&results, round, cfg.minimal);
+
+        if live_redraw {
+            println!("\x1b[H{header_line}");
+            for line in &content_lines {
+                println!("{line}");
+            }
+            print!("\x1b[J");
+            let _ = std::io::stdout().flush();
+        } else {
+            for line in &content_lines {
+                println!("{line}");
+            }
+        }
 
         if WATCH_INTERRUPTED.load(Ordering::SeqCst) {
             break;
         }
 
-        if let Some(remaining) = WATCH_MIN_PASS_INTERVAL.checked_sub(pass_start.elapsed()) {
+        if let Some(remaining) = WATCH_MIN_ROUND_INTERVAL.checked_sub(round_start.elapsed()) {
             thread::sleep(remaining);
         }
     }
 
-    print!("\x1b[?25h\x1b[?1049l");
-    let _ = std::io::stdout().flush();
+    if live_redraw {
+        print!("\x1b[?25h\x1b[?1049l");
+        let _ = std::io::stdout().flush();
+    }
+
+    if cfg.minimal {
+        print_responsive_minimal(&responsive_hosts, cfg.minimal);
+    }
+    let total_attempts = hosts.len() * usize::try_from(round).unwrap_or(usize::MAX);
+    print_host_summary(hosts.len(), responsive_hosts.len(), cfg.minimal);
+    print_statistics(
+        &format!("{} subnet", cfg.kind.header_protocol()),
+        total_attempts,
+        successes,
+        &times,
+    );
 }

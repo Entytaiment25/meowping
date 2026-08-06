@@ -93,9 +93,6 @@ pub fn print_help() {
     println!("    -m, --minimal             Changes the Prints to be more Minimal");
     println!("    -s, --http              Check if the destination URL is online via HTTP/S");
     println!("    -u, --udp              Probe a UDP port instead of using TCP (requires -p)");
-    println!(
-        "    -w, --watch             Continuously re-probe a subnet and live-update all host statuses (Ctrl+C to stop)"
-    );
     println!("    -a, --no-asn            Disable ASN/organization lookups (use static data)");
     println!(
         "    -C, --config [path]     Load settings from a config file (default: meowping.conf next to the executable)"
@@ -137,15 +134,15 @@ pub fn print_help() {
     println!("    {name} 192.168.1.0/24 -p 80");
     println!("    {name} 2001:db8::/120");
     println!("    {name} fe80::/112 -p 22");
-    println!("    {name} 192.168.1.0/24 -w");
-    println!("    {name} 192.168.1.0/24 -p 22 -w");
 
     println!("\n{}:", "IPv6 Support".bright_blue());
     println!("    MeowPing supports IPv6 addresses for all connection types (ICMP, TCP, HTTP)");
     println!("    IPv6 subnet scanning is supported up to /112 prefix length");
 
     println!("\n{}:", "Notes".bright_blue());
-    println!("    • Subnet scans default to 1 attempt per host unless -c is specified");
+    println!(
+        "    • Subnet scans continuously re-probe and live-update host statuses (Ctrl+C to stop) unless -c is specified"
+    );
     println!("    • Multi-ping supports mixing hostnames and IP addresses");
     println!("    • ICMP may require elevated privileges on some systems");
     println!(

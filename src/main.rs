@@ -74,9 +74,8 @@ fn handle_subnet_scan(
     port: Option<u16>,
     udp: bool,
     timeout: u64,
-    per_host_attempts: usize,
+    rounds: Option<usize>,
     minimal: bool,
-    watch: bool,
 ) {
     let Some(p) = port else {
         return match subnet {
@@ -85,36 +84,34 @@ fn handle_subnet_scan(
                 timeout,
                 DEFAULT_TTL,
                 DEFAULT_IDENT,
-                per_host_attempts,
+                rounds,
                 &DEFAULT_ICMP_PAYLOAD,
                 minimal,
-                watch,
             ),
             SubnetRef::V6(s) => perform_icmp_ipv6_subnet_scan(
                 s,
                 timeout,
                 DEFAULT_TTL,
                 DEFAULT_IDENT,
-                per_host_attempts,
+                rounds,
                 &DEFAULT_ICMP_PAYLOAD,
                 minimal,
-                watch,
             ),
         };
     };
 
     match (subnet, udp) {
         (SubnetRef::V4(s), true) => {
-            perform_udp_subnet_scan(s, p, timeout, per_host_attempts, minimal, watch);
+            perform_udp_subnet_scan(s, p, timeout, rounds, minimal);
         }
         (SubnetRef::V4(s), false) => {
-            perform_tcp_subnet_scan(s, p, timeout, per_host_attempts, minimal, watch);
+            perform_tcp_subnet_scan(s, p, timeout, rounds, minimal);
         }
         (SubnetRef::V6(s), true) => {
-            perform_udp_ipv6_subnet_scan(s, p, timeout, per_host_attempts, minimal, watch);
+            perform_udp_ipv6_subnet_scan(s, p, timeout, rounds, minimal);
         }
         (SubnetRef::V6(s), false) => {
-            perform_tcp_ipv6_subnet_scan(s, p, timeout, per_host_attempts, minimal, watch);
+            perform_tcp_ipv6_subnet_scan(s, p, timeout, rounds, minimal);
         }
     }
 }
@@ -266,7 +263,7 @@ struct ProbeCtx<'a> {
     per_host_attempts: usize,
     minimal: bool,
     no_asn: bool,
-    watch: bool,
+    explicit_count: bool,
 }
 
 #[inline(never)]
@@ -339,15 +336,16 @@ fn run_probe_dispatch(ctx: &ProbeCtx<'_>) -> Result<(), Box<dyn Error>> {
 
 #[inline(never)]
 fn run_host_dispatch(ctx: &ProbeCtx<'_>, port: Option<u16>) -> Result<(), Box<dyn Error>> {
+    let rounds = ctx.explicit_count.then_some(ctx.per_host_attempts);
+
     if let Some(subnet) = ctx.subnet_target {
         handle_subnet_scan(
             SubnetRef::V4(subnet),
             port,
             ctx.udp,
             ctx.timeout,
-            ctx.per_host_attempts,
+            rounds,
             ctx.minimal,
-            ctx.watch,
         );
         return Ok(());
     }
@@ -357,9 +355,8 @@ fn run_host_dispatch(ctx: &ProbeCtx<'_>, port: Option<u16>) -> Result<(), Box<dy
             port,
             ctx.udp,
             ctx.timeout,
-            ctx.per_host_attempts,
+            rounds,
             ctx.minimal,
-            ctx.watch,
         );
         return Ok(());
     }
@@ -486,7 +483,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let http_check = args.contains(["-s", "--http"]);
     let no_asn = args.contains(["-a", "--no-asn"]) || cfg.and_then(|c| c.no_asn).unwrap_or(false);
     let udp = args.contains(["-u", "--udp"]);
-    let watch = args.contains(["-w", "--watch"]);
 
     let destination_input = read_destination(&mut args)?;
     let ResolvedTargets {
@@ -496,18 +492,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         ipv6_subnet_target,
     } = resolve_targets(&destination_input);
 
-    if watch && subnet_target.is_none() && ipv6_subnet_target.is_none() {
-        return Err("--watch is only supported for subnet targets".into());
-    }
-
     let timeout = args
         .opt_value_from_str(["-t", "--timeout"])
         .map_err(|_| "Failed to parse timeout argument")?
         .unwrap_or(1000);
 
-    let (count, count_from_cli) = parse_count(&mut args)?;
+    let (count, explicit_count) = parse_count(&mut args)?;
     let per_host_attempts: usize =
-        if (subnet_target.is_some() || ipv6_subnet_target.is_some()) && !count_from_cli {
+        if (subnet_target.is_some() || ipv6_subnet_target.is_some()) && !explicit_count {
             1
         } else {
             count
@@ -540,10 +532,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("UDP probing requires a port (use -p/--port with --udp)".into());
     }
 
-    if watch && ports.as_ref().is_some_and(|p| p.len() > 1) {
-        return Err("--watch does not support multiple ports, use a single port".into());
-    }
-
     if !minimal {
         output::print_welcome();
     }
@@ -561,7 +549,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         per_host_attempts,
         minimal,
         no_asn,
-        watch,
+        explicit_count,
     };
 
     run_probe_dispatch(&ctx)?;
