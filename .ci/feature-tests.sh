@@ -221,8 +221,8 @@ if [[ "$HAVE_ICMP_PERMS" == "true" && "$HAVE_IPV6_ICMP" == "true" ]]; then
     else
         OUTPUT_IPV6_3=$($MEOWPING_PATH ::1/127 -c 1 -m)
     fi
-    if ! echo "$OUTPUT_IPV6_3" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Scanning ::/127"; then
-        echo "Test failed: Expected 'Scanning ::/127' in IPv6 subnet scan output"
+    if ! echo "$OUTPUT_IPV6_3" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Watching ::/127"; then
+        echo "Test failed: Expected 'Watching ::/127' in IPv6 subnet scan output"
         echo "Actual output:"
         echo "$OUTPUT_IPV6_3"
         exit 1
@@ -254,8 +254,8 @@ fi
 
 # Test IPv6 subnet TCP scan (/126 = 4 addresses, 2 usable)
 OUTPUT_IPV6_5=$($MEOWPING ::1/126 -p 9999 -c 1 -m)
-if ! echo "$OUTPUT_IPV6_5" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Scanning"; then
-    echo "Test failed: Expected 'Scanning' in IPv6 TCP subnet output"
+if ! echo "$OUTPUT_IPV6_5" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Watching"; then
+    echo "Test failed: Expected 'Watching' in IPv6 TCP subnet output"
     echo "Actual output:"
     echo "$OUTPUT_IPV6_5"
     exit 1
