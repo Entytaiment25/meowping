@@ -2,7 +2,7 @@ cargo-features = ["panic-immediate-abort"]
 
 [package]
 name = "meowping"
-version = "2.0.15"
+version = "2.0.16"
 authors = ["Entytaiment25"]
 edition = "2024"
 rust-version = "1.97.1"
@@ -16,8 +16,9 @@ readme = "README.md"
 build = "build.rs"
 
 [profile.dev]
-opt-level = 0
+debug = "line-tables-only"
 overflow-checks = false
+opt-level = 0
 
 [profile.release]
 codegen-units = 1

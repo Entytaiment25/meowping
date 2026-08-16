@@ -1,5 +1,5 @@
 [build]
-rustflags = ["-Zshare-generics=false"]
+rustflags = ["-Zshare-generics=false", "-Z", "threads=8"]
 
 [unstable]
 build-std = ["std", "panic_abort"]
