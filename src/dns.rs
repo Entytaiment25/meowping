@@ -1,5 +1,5 @@
 use crate::colors::Colorize;
-use crate::output::{color_time, print_statistics};
+use crate::output::{color_time, format_with_prefix, print_statistics};
 use crate::parser::{Extracted, Parser};
 use std::collections::VecDeque;
 use std::error::Error;
@@ -8,7 +8,7 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const DEFAULT_DNS_SERVER: SocketAddr =
+pub const DEFAULT_DNS_SERVER: SocketAddr =
     SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), 53));
 
 const fn rcode_name(rcode: u8) -> &'static str {
@@ -74,11 +74,16 @@ enum DnsOutcome {
     NoResponse,
 }
 
-fn dns_probe_once(query: &[u8], id: u16, timeout: Duration) -> DnsOutcome {
-    let Ok(sock) = UdpSocket::bind("0.0.0.0:0") else {
+fn dns_probe_once(query: &[u8], id: u16, timeout: Duration, dns_server: SocketAddr) -> DnsOutcome {
+    let bind_addr = if dns_server.is_ipv4() {
+        "0.0.0.0:0"
+    } else {
+        "[::]:0"
+    };
+    let Ok(sock) = UdpSocket::bind(bind_addr) else {
         return DnsOutcome::NoResponse;
     };
-    if sock.connect(DEFAULT_DNS_SERVER).is_err() {
+    if sock.connect(dns_server).is_err() {
         return DnsOutcome::NoResponse;
     }
     if sock.set_read_timeout(Some(timeout)).is_err() {
@@ -113,19 +118,19 @@ fn dns_probe_once(query: &[u8], id: u16, timeout: Duration) -> DnsOutcome {
     }
 }
 
-fn format_dns_status(domain: &str, outcome: &DnsOutcome, minimal: bool) -> String {
-    let resolver = DEFAULT_DNS_SERVER.ip().to_string();
-    let prefix = if minimal {
-        String::new()
-    } else {
-        format!("{} ", "[MEOWPING]".magenta())
-    };
+fn format_dns_status(
+    domain: &str,
+    outcome: &DnsOutcome,
+    minimal: bool,
+    dns_server: SocketAddr,
+) -> String {
+    let resolver = dns_server.ip().to_string();
 
-    match outcome {
+    let body = match outcome {
         DnsOutcome::Resolved { rtt, ancount } => {
             let time_colored = color_time(rtt.as_secs_f64() * 1000.0);
             format!(
-                "{prefix}{} : {} protocol=DNS domain={} rcode={} answers={}",
+                "{} : {} protocol=DNS domain={} rcode={} answers={}",
                 resolver.green(),
                 time_colored,
                 domain.green(),
@@ -136,7 +141,7 @@ fn format_dns_status(domain: &str, outcome: &DnsOutcome, minimal: bool) -> Strin
         DnsOutcome::Negative { rtt, rcode } => {
             let time_colored = color_time(rtt.as_secs_f64() * 1000.0);
             format!(
-                "{prefix}{} : {} protocol=DNS domain={} rcode={}",
+                "{} : {} protocol=DNS domain={} rcode={}",
                 resolver.orange(),
                 time_colored,
                 domain.orange(),
@@ -145,12 +150,14 @@ fn format_dns_status(domain: &str, outcome: &DnsOutcome, minimal: bool) -> Strin
         }
         DnsOutcome::NoResponse => {
             format!(
-                "{prefix}{} timed out: protocol=DNS domain={}",
+                "{} timed out: protocol=DNS domain={}",
                 resolver.red(),
                 domain.red()
             )
         }
-    }
+    };
+
+    format_with_prefix(minimal, &body)
 }
 
 fn next_query_id(seed: u16, attempt: usize) -> u16 {
@@ -162,17 +169,14 @@ pub fn perform_dns(
     timeout: u64,
     count: usize,
     minimal: bool,
+    dns_server: SocketAddr,
 ) -> Result<(), Box<dyn Error>> {
     let domain = match Parser::extract_url(destination) {
         Extracted::Success(host) => host,
         Extracted::Error => {
             let message =
                 format!("DNS Lookup of domain failed: Invalid host or URL: {destination}");
-            if minimal {
-                println!("{message}");
-            } else {
-                println!("{} {}", "[MEOWPING]".magenta(), message);
-            }
+            println!("{}", format_with_prefix(minimal, &message));
             return Ok(());
         }
     };
@@ -193,9 +197,9 @@ pub fn perform_dns(
             return Err(format!("Invalid domain for DNS query: {domain}").into());
         };
 
-        let outcome = dns_probe_once(&query, id, timeout_dur);
+        let outcome = dns_probe_once(&query, id, timeout_dur, dns_server);
         let is_success = matches!(outcome, DnsOutcome::Resolved { .. });
-        let entry = format_dns_status(&domain, &outcome, minimal);
+        let entry = format_dns_status(&domain, &outcome, minimal, dns_server);
         println!("{entry}");
 
         match outcome {

@@ -21,7 +21,7 @@ use cli::{Arguments, OptionalFlagValue};
 use colors::Colorize;
 use dns::perform_dns;
 use http_check::perform_http_check;
-use icmp::{DEFAULT_ICMP_PAYLOAD, DEFAULT_IDENT, DEFAULT_TTL, perform_icmp};
+use icmp::{CLASSIC_ICMP_PAYLOAD, DEFAULT_IDENT, DEFAULT_TTL, MEOW_ICMP_PAYLOAD, perform_icmp};
 use parser::{Extracted, Parser, parse_multiple_destinations, parse_ports};
 use subnet::{
     Ipv4Subnet, Ipv6Subnet, perform_icmp_ipv6_subnet_scan, perform_icmp_subnet_scan,
@@ -78,6 +78,7 @@ fn handle_subnet_scan(
     timeout: u64,
     rounds: Option<usize>,
     minimal: bool,
+    payload: &[u8; 24],
 ) {
     let Some(p) = port else {
         return match subnet {
@@ -87,7 +88,7 @@ fn handle_subnet_scan(
                 DEFAULT_TTL,
                 DEFAULT_IDENT,
                 rounds,
-                &DEFAULT_ICMP_PAYLOAD,
+                payload,
                 minimal,
             ),
             SubnetRef::V6(s) => perform_icmp_ipv6_subnet_scan(
@@ -96,7 +97,7 @@ fn handle_subnet_scan(
                 DEFAULT_TTL,
                 DEFAULT_IDENT,
                 rounds,
-                &DEFAULT_ICMP_PAYLOAD,
+                payload,
                 minimal,
             ),
         };
@@ -145,7 +146,13 @@ fn resolve_destination(dest: &str, minimal: bool) -> Option<String> {
 }
 
 #[inline(never)]
-fn handle_multi_icmp(destinations: &[String], timeout: u64, count: usize, minimal: bool) {
+fn handle_multi_icmp(
+    destinations: &[String],
+    timeout: u64,
+    count: usize,
+    minimal: bool,
+    payload: &[u8; 24],
+) {
     for dest in destinations {
         if let Some(destination) = resolve_destination(dest, minimal) {
             if !minimal {
@@ -161,7 +168,7 @@ fn handle_multi_icmp(destinations: &[String], timeout: u64, count: usize, minima
                 DEFAULT_TTL,
                 DEFAULT_IDENT,
                 count,
-                &DEFAULT_ICMP_PAYLOAD,
+                payload,
                 minimal,
             );
         }
@@ -169,6 +176,7 @@ fn handle_multi_icmp(destinations: &[String], timeout: u64, count: usize, minima
 }
 
 #[inline(never)]
+#[allow(clippy::too_many_arguments)]
 fn handle_single_destination(
     destination_input: &str,
     port: Option<u16>,
@@ -177,6 +185,7 @@ fn handle_single_destination(
     count: usize,
     minimal: bool,
     no_asn: bool,
+    payload: &[u8; 24],
 ) -> Result<(), Box<dyn Error>> {
     let destination = resolve_destination(destination_input, minimal)
         .ok_or("DNS Lookup of domain failed: Invalid host or URL")?;
@@ -196,7 +205,7 @@ fn handle_single_destination(
                 DEFAULT_TTL,
                 DEFAULT_IDENT,
                 count,
-                &DEFAULT_ICMP_PAYLOAD,
+                payload,
                 minimal,
             )?;
         }
@@ -205,25 +214,26 @@ fn handle_single_destination(
 }
 
 fn load_config(args: &mut Arguments) -> Result<Option<config::Config>, Box<dyn Error>> {
-    match args.opt_flag_with_optional_value(["-C", "--config"]) {
-        OptionalFlagValue::Present(path) => {
-            let config_path = std::path::PathBuf::from(path);
-            Ok(Some(
-                config::Config::load(&config_path).map_err(|e| -> Box<dyn Error> { e.into() })?,
-            ))
+    let (config_path, missing_ok, parse_fatal) =
+        match args.opt_flag_with_optional_value(["-C", "--config"]) {
+            OptionalFlagValue::Present(path) => (std::path::PathBuf::from(path), false, true),
+            OptionalFlagValue::PresentWithoutValue => (config::Config::default_path(), true, true),
+            OptionalFlagValue::Missing => (config::Config::default_path(), true, false),
+        };
+    if missing_ok && !config_path.exists() {
+        return Ok(None);
+    }
+    match config::Config::load(&config_path) {
+        Ok(cfg) => Ok(Some(cfg)),
+        Err(e) if parse_fatal => Err(e.into()),
+        Err(e) => {
+            eprintln!(
+                "{} Ignoring '{}': {e}",
+                "[MEOWPING]".magenta(),
+                config_path.display()
+            );
+            Ok(None)
         }
-        OptionalFlagValue::PresentWithoutValue => {
-            let config_path = config::Config::default_path();
-            if config_path.exists() {
-                Ok(Some(
-                    config::Config::load(&config_path)
-                        .map_err(|e| -> Box<dyn Error> { e.into() })?,
-                ))
-            } else {
-                Ok(None)
-            }
-        }
-        OptionalFlagValue::Missing => Ok(None),
     }
 }
 
@@ -266,6 +276,7 @@ struct ProbeCtx<'a> {
     minimal: bool,
     no_asn: bool,
     explicit_count: bool,
+    payload: &'a [u8; 24],
 }
 
 #[inline(never)]
@@ -348,6 +359,7 @@ fn run_host_dispatch(ctx: &ProbeCtx<'_>, port: Option<u16>) -> Result<(), Box<dy
             ctx.timeout,
             rounds,
             ctx.minimal,
+            ctx.payload,
         );
         return Ok(());
     }
@@ -359,59 +371,52 @@ fn run_host_dispatch(ctx: &ProbeCtx<'_>, port: Option<u16>) -> Result<(), Box<dy
             ctx.timeout,
             rounds,
             ctx.minimal,
+            ctx.payload,
         );
         return Ok(());
     }
 
-    match port {
-        None => {
-            if ctx.is_multi {
-                handle_multi_icmp(ctx.destinations, ctx.timeout, ctx.count, ctx.minimal);
-            } else {
-                handle_single_destination(
-                    ctx.destination_input,
-                    None,
-                    ctx.udp,
+    if ctx.is_multi {
+        match port {
+            None => handle_multi_icmp(
+                ctx.destinations,
+                ctx.timeout,
+                ctx.count,
+                ctx.minimal,
+                ctx.payload,
+            ),
+            Some(p) if ctx.udp => {
+                perform_udp_multi_scan(
+                    ctx.destinations,
+                    p,
                     ctx.timeout,
                     ctx.count,
                     ctx.minimal,
                     ctx.no_asn,
-                )?;
+                );
             }
-        }
-        Some(p) => {
-            if ctx.is_multi {
-                if ctx.udp {
-                    perform_udp_multi_scan(
-                        ctx.destinations,
-                        p,
-                        ctx.timeout,
-                        ctx.count,
-                        ctx.minimal,
-                        ctx.no_asn,
-                    );
-                } else {
-                    perform_tcp_multi_scan(
-                        ctx.destinations,
-                        p,
-                        ctx.timeout,
-                        ctx.count,
-                        ctx.minimal,
-                        ctx.no_asn,
-                    );
-                }
-            } else {
-                handle_single_destination(
-                    ctx.destination_input,
-                    Some(p),
-                    ctx.udp,
+            Some(p) => {
+                perform_tcp_multi_scan(
+                    ctx.destinations,
+                    p,
                     ctx.timeout,
                     ctx.count,
                     ctx.minimal,
                     ctx.no_asn,
-                )?;
+                );
             }
         }
+    } else {
+        handle_single_destination(
+            ctx.destination_input,
+            port,
+            ctx.udp,
+            ctx.timeout,
+            ctx.count,
+            ctx.minimal,
+            ctx.no_asn,
+            ctx.payload,
+        )?;
     }
     Ok(())
 }
@@ -485,6 +490,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let http_check = args.contains(["-s", "--http"]);
     let no_asn = args.contains(["-a", "--no-asn"]) || cfg.and_then(|c| c.no_asn).unwrap_or(false);
     let udp = args.contains(["-u", "--udp"]);
+    let dns_server = cfg
+        .and_then(|c| c.dns_server)
+        .unwrap_or(dns::DEFAULT_DNS_SERVER);
+    let payload: &[u8; 24] = if cfg.and_then(|c| c.classic_payload).unwrap_or(false) {
+        &CLASSIC_ICMP_PAYLOAD
+    } else {
+        &MEOW_ICMP_PAYLOAD
+    };
 
     let destination_input = read_destination(&mut args)?;
     let ResolvedTargets {
@@ -506,6 +519,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         } else {
             count
         };
+
+    if !minimal {
+        output::print_welcome();
+    }
 
     if http_check {
         if subnet_target.is_some() || ipv6_subnet_target.is_some() {
@@ -530,12 +547,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         if is_multi {
             for domain in &destinations {
-                if let Err(e) = perform_dns(domain, timeout, count, minimal) {
+                if let Err(e) = perform_dns(domain, timeout, count, minimal, dns_server) {
                     output::print_with_prefix(minimal, &format!("{domain}: {e}").red());
                 }
             }
         } else {
-            perform_dns(&destination_input, timeout, count, minimal)?;
+            perform_dns(&destination_input, timeout, count, minimal, dns_server)?;
         }
         return Ok(());
     }
@@ -548,10 +565,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     if udp && ports.is_none() {
         return Err("UDP probing requires a port (use -p/--port with --udp)".into());
-    }
-
-    if !minimal {
-        output::print_welcome();
     }
 
     let ctx = ProbeCtx {
@@ -568,6 +581,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         minimal,
         no_asn,
         explicit_count,
+        payload,
     };
 
     run_probe_dispatch(&ctx)?;

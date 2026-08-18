@@ -94,7 +94,7 @@ pub fn print_help() {
     println!("    -s, --http              Check if the destination URL is online via HTTP/S");
     println!("    -u, --udp              Probe a UDP port instead of using TCP (requires -p)");
     println!(
-        "    -d, --dns               DNS ping: time A record lookups for the destination via 1.1.1.1"
+        "    -d, --dns               DNS ping: time A record lookups for the destination (resolver: dns_server in config, default 1.1.1.1)"
     );
     println!("    -a, --no-asn            Disable ASN/organization lookups (use static data)");
     println!(

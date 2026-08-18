@@ -90,14 +90,16 @@ UDP is connectionless, so the probe resolves into three states: a response means
 
 ## Config File
 
-Place a `meowping.conf` next to the executable (or pass `--config /path/to/file.conf`) to set persistent defaults and custom HTTP headers.
+Place a `meowping.conf` next to the executable to set persistent defaults and custom HTTP headers, no flag needed. Pass `--config /path/to/file.conf` to use a different file instead.
 
 ```ini
 # meowping.conf
 
 [settings]
-minimal = true
-no_asn  = false
+minimal          = true
+no_asn           = false
+dns_server       = 1.1.1.1:53
+classic_payload  = false
 
 [headers]
 User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36
@@ -106,7 +108,7 @@ Accept-Language: en-US,en;q=0.9
 ```
 
 - Both sections are optional.
-- `[settings]` supports `minimal` and `no_asn` — CLI flags always take precedence.
+- `[settings]` supports `minimal`, `no_asn`, `dns_server` (used by `-d`/`--dns`, accepts `ip` or `ip:port`, default `1.1.1.1:53`), and `classic_payload` (use a normal incrementing ICMP payload instead of the default `meow` payload, default `false`) — CLI flags always take precedence.
 - `[headers]` replaces the built-in defaults for `-s`/`--http` checks entirely. `Host` and `Connection: close` are always added automatically.
 - Blank lines and lines starting with `#` are ignored.
 

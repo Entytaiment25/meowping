@@ -1,9 +1,12 @@
 use std::fs;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 
 pub struct Config {
     pub minimal: Option<bool>,
     pub no_asn: Option<bool>,
+    pub dns_server: Option<SocketAddr>,
+    pub classic_payload: Option<bool>,
     pub http_headers: Vec<String>,
 }
 
@@ -28,6 +31,8 @@ impl Config {
 
         let mut minimal = None;
         let mut no_asn = None;
+        let mut dns_server = None;
+        let mut classic_payload = None;
         let mut http_headers = Vec::new();
         let mut section = Section::Headers;
 
@@ -57,6 +62,10 @@ impl Config {
                     match key.trim() {
                         "minimal" => minimal = Some(parse_bool(value.trim(), i + 1)?),
                         "no_asn" => no_asn = Some(parse_bool(value.trim(), i + 1)?),
+                        "classic_payload" => {
+                            classic_payload = Some(parse_bool(value.trim(), i + 1)?);
+                        }
+                        "dns_server" => dns_server = Some(parse_dns_server(value.trim(), i + 1)?),
                         unknown => {
                             return Err(format!(
                                 "Config line {}: unknown setting '{}'",
@@ -82,6 +91,8 @@ impl Config {
         Ok(Self {
             minimal,
             no_asn,
+            dns_server,
+            classic_payload,
             http_headers,
         })
     }
@@ -93,4 +104,15 @@ fn parse_bool(s: &str, line: usize) -> Result<bool, String> {
         "false" | "0" | "no" => Ok(false),
         _ => Err(format!("Config line {line}: expected true/false, got: {s}")),
     }
+}
+
+fn parse_dns_server(s: &str, line: usize) -> Result<SocketAddr, String> {
+    if let Ok(addr) = s.parse::<SocketAddr>() {
+        return Ok(addr);
+    }
+    (s, 53u16)
+        .to_socket_addrs()
+        .ok()
+        .and_then(|mut addrs| addrs.next())
+        .ok_or_else(|| format!("Config line {line}: invalid dns_server '{s}'"))
 }

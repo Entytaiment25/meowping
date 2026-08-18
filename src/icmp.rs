@@ -5,9 +5,13 @@ use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
-pub const DEFAULT_ICMP_PAYLOAD: [u8; 24] = [
+pub const MEOW_ICMP_PAYLOAD: [u8; 24] = [
     46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109, 101, 111, 119, 46, 46, 46, 109, 101, 111, 119,
     46, 46, 46,
+];
+
+pub const CLASSIC_ICMP_PAYLOAD: [u8; 24] = [
+    8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
 ];
 
 pub const DEFAULT_TTL: u8 = 64;
