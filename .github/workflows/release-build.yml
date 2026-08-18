@@ -70,3 +70,14 @@ jobs:
      shell: bash
      run: |
       gh release upload "${{ github.event.release.tag_name }}" ${{ env.ASSET }} --clobber
+
+ notify-homebrew:
+  needs: build
+  runs-on: ubuntu-latest
+  steps:
+   - name: Trigger homebrew-meowping formula update
+     env:
+      GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+     run: |
+      gh api repos/Entytaiment25/homebrew-meowping/dispatches \
+        -f event_type=release
