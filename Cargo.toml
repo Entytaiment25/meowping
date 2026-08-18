@@ -46,3 +46,6 @@ windows-sys = { version = "0.61.2", features = [
 
 [target.'cfg(windows)'.build-dependencies]
 windres = "0.2.2"
+
+[package.metadata.binstall]
+bin-dir = "{ bin }{ binary-ext }"
