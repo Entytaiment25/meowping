@@ -6,6 +6,7 @@ use std::{error::Error, net::IpAddr};
 mod cli;
 mod colors;
 mod config;
+mod dns;
 mod http_check;
 mod https;
 mod icmp;
@@ -18,6 +19,7 @@ mod udp;
 
 use cli::{Arguments, OptionalFlagValue};
 use colors::Colorize;
+use dns::perform_dns;
 use http_check::perform_http_check;
 use icmp::{DEFAULT_ICMP_PAYLOAD, DEFAULT_IDENT, DEFAULT_TTL, perform_icmp};
 use parser::{Extracted, Parser, parse_multiple_destinations, parse_ports};
@@ -519,6 +521,22 @@ fn main() -> Result<(), Box<dyn Error>> {
             is_multi,
             http_headers,
         );
+        return Ok(());
+    }
+
+    if args.contains(["-d", "--dns"]) {
+        if subnet_target.is_some() || ipv6_subnet_target.is_some() {
+            return Err("DNS ping is not supported for subnet targets".into());
+        }
+        if is_multi {
+            for domain in &destinations {
+                if let Err(e) = perform_dns(domain, timeout, count, minimal) {
+                    output::print_with_prefix(minimal, &format!("{domain}: {e}").red());
+                }
+            }
+        } else {
+            perform_dns(&destination_input, timeout, count, minimal)?;
+        }
         return Ok(());
     }
 

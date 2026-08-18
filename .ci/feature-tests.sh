@@ -410,6 +410,76 @@ if ! echo "$OUTPUT_UDP_SUBNET" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "Hosts resp
 fi
 
 # ============================================================================
+# DNS Ping Tests
+# ============================================================================
+
+echo "Running DNS tests..."
+
+# DNS help text
+OUTPUT_DNS_HELP=$($MEOWPING --help)
+if ! echo "$OUTPUT_DNS_HELP" | sed 's/\x1b\[[0-9;]*m//g' | grep -q -- "-d, --dns"; then
+    echo "Test failed: Expected DNS option in help text"
+    echo "Actual output:"
+    echo "$OUTPUT_DNS_HELP"
+    exit 1
+fi
+
+# DNS ping is not supported for subnet targets
+OUTPUT_DNS_SUBNET=$($MEOWPING 192.168.1.0/24 -d -m 2>&1 || true)
+if ! echo "$OUTPUT_DNS_SUBNET" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "DNS ping is not supported for subnet targets"; then
+    echo "Test failed: Expected 'DNS ping is not supported for subnet targets' for -d on a subnet"
+    echo "Actual output:"
+    echo "$OUTPUT_DNS_SUBNET"
+    exit 1
+fi
+
+# An RFC 2606 reserved TLD deterministically fails system resolution, no
+# outbound DNS query is sent, and the invalid-host error is reported instead.
+OUTPUT_DNS_INVALID=$($MEOWPING example.invalid -d -c 1 -m 2>&1 || true)
+if ! echo "$OUTPUT_DNS_INVALID" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "DNS Lookup of domain failed: Invalid host or URL"; then
+    echo "Test failed: Expected 'DNS Lookup of domain failed: Invalid host or URL' for example.invalid"
+    echo "Actual output:"
+    echo "$OUTPUT_DNS_INVALID"
+    exit 1
+fi
+
+# DNS ping sends a raw A-record query to 1.1.1.1:53, same external dependency
+# as the UDP tests above, so it is gated on the same HAVE_EXT_UDP check.
+if [[ "$HAVE_EXT_UDP" == "true" ]]; then
+    OUTPUT_DNS_OK=$($MEOWPING cloudflare.com -d -c 1 -m)
+    if ! echo "$OUTPUT_DNS_OK" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "protocol=DNS domain=cloudflare.com rcode=NOERROR"; then
+        echo "Test failed: Expected 'protocol=DNS domain=cloudflare.com rcode=NOERROR' for DNS ping"
+        echo "Actual output:"
+        echo "$OUTPUT_DNS_OK"
+        exit 1
+    fi
+    if ! echo "$OUTPUT_DNS_OK" | sed 's/\x1b\[[0-9;]*m//g' | grep -q "DNS Ping statistics:"; then
+        echo "Test failed: Expected 'DNS Ping statistics:' in DNS ping output"
+        echo "Actual output:"
+        echo "$OUTPUT_DNS_OK"
+        exit 1
+    fi
+    if echo "$OUTPUT_DNS_OK" | grep -q "\[MEOWPING\]"; then
+        echo "Test failed: Minimal mode DNS output must not contain the [MEOWPING] prefix"
+        echo "Actual output:"
+        echo "$OUTPUT_DNS_OK"
+        exit 1
+    fi
+
+    # Multi-domain DNS ping resolves each destination independently.
+    OUTPUT_DNS_MULTI=$($MEOWPING cloudflare.com,google.com -d -c 1 -m)
+    DNS_LINE_COUNT=$(echo "$OUTPUT_DNS_MULTI" | sed 's/\x1b\[[0-9;]*m//g' | grep -c "protocol=DNS")
+    if [ "$DNS_LINE_COUNT" -ne 2 ]; then
+        echo "Test failed: Expected 2 'protocol=DNS' lines in multi-domain DNS output, got $DNS_LINE_COUNT"
+        echo "Actual output:"
+        echo "$OUTPUT_DNS_MULTI"
+        exit 1
+    fi
+else
+    echo "Skipping external DNS ping tests (outbound UDP to 1.1.1.1:53 unavailable)"
+fi
+
+# ============================================================================
 # Multi-Port Probe Tests
 # ============================================================================
 

@@ -93,6 +93,9 @@ pub fn print_help() {
     println!("    -m, --minimal             Changes the Prints to be more Minimal");
     println!("    -s, --http              Check if the destination URL is online via HTTP/S");
     println!("    -u, --udp              Probe a UDP port instead of using TCP (requires -p)");
+    println!(
+        "    -d, --dns               DNS ping: time A record lookups for the destination via 1.1.1.1"
+    );
     println!("    -a, --no-asn            Disable ASN/organization lookups (use static data)");
     println!(
         "    -C, --config [path]     Load settings from a config file (default: meowping.conf next to the executable)"
@@ -119,6 +122,10 @@ pub fn print_help() {
     println!("    {name} 192.168.1.1 -p 20-25");
     println!("    {name} 1.1.1.1 -p 53,80,443 -u");
     println!("    {name} 192.168.1.0/28 -p 80,443");
+
+    println!("\n  {}:", "DNS Ping".yellow());
+    println!("    {name} google.com -d");
+    println!("    {name} google.com,cloudflare.com -d -c 5");
 
     println!("\n  {}:", "HTTP/HTTPS Check".yellow());
     println!("    {name} https://example.com -s");
