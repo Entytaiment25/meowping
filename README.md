@@ -121,6 +121,10 @@ sudo setcap cap_net_raw+ep ./meowping
 ```bash
 cargo install meowping
 ```
+**For Anyone via cargo-binstall (prebuilt binary, no compiling)**
+```bash
+cargo binstall meowping
+```
 **For macOS Users via Homebrew**
 ```bash
 brew tap Entytaiment25/meowping
