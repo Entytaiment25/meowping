@@ -3,8 +3,8 @@ use super::scan::{
     print_responsive_minimal, probe_chunk,
 };
 use crate::colors::Colorize;
-use crate::output::{format_with_prefix, print_statistics};
-use std::collections::{HashSet, VecDeque};
+use crate::output::{PingStats, format_with_prefix, print_statistics};
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -122,9 +122,8 @@ pub(super) fn perform_subnet_watch(hosts: &[IpAddr], cfg: &ScanConfig) {
 
     let mut seq: u16 = 1;
     let mut round: u64 = 0;
-    let mut successes = 0usize;
+    let mut stats = PingStats::default();
     let mut responsive_hosts: HashSet<IpAddr> = HashSet::new();
-    let mut times = VecDeque::new();
 
     while !WATCH_INTERRUPTED.load(Ordering::SeqCst) {
         if max_rounds.is_some_and(|limit| round >= u64::try_from(limit).unwrap_or(u64::MAX)) {
@@ -136,12 +135,9 @@ pub(super) fn perform_subnet_watch(hosts: &[IpAddr], cfg: &ScanConfig) {
         let results = probe_chunk(hosts, &cfg.kind, &mut seq);
 
         for status in &results {
+            stats.record(status.is_responsive(), status.latency_us());
             if status.is_responsive() {
-                successes += 1;
                 responsive_hosts.insert(status.host);
-                times.push_back(status.latency_us().unwrap_or(0));
-            } else {
-                times.push_back(0);
             }
         }
 
@@ -177,12 +173,6 @@ pub(super) fn perform_subnet_watch(hosts: &[IpAddr], cfg: &ScanConfig) {
     if cfg.minimal {
         print_responsive_minimal(&responsive_hosts, cfg.minimal);
     }
-    let total_attempts = hosts.len() * usize::try_from(round).unwrap_or(usize::MAX);
     print_host_summary(hosts.len(), responsive_hosts.len(), cfg.minimal);
-    print_statistics(
-        &format!("{} subnet", cfg.kind.header_protocol()),
-        total_attempts,
-        successes,
-        &times,
-    );
+    print_statistics(&format!("{} subnet", cfg.kind.header_protocol()), &stats);
 }

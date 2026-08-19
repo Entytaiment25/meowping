@@ -15,6 +15,10 @@ impl Parser {
             }
         };
 
+        if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+            return Err("Unsupported URL scheme (expected http or https)");
+        }
+
         let host_end = url.find('/').unwrap_or(url.len());
 
         let host_port = &url[..host_end];
@@ -32,14 +36,18 @@ impl Parser {
                 host = &host_port[1..bracket_end];
                 let after = &host_port[bracket_end + 1..];
                 if let Some(port_str) = after.strip_prefix(':') {
-                    port = port_str.parse().ok();
+                    port = Some(port_str.parse::<u16>().map_err(|_| "Invalid port")?);
                 }
             } else {
                 return Err("Invalid IPv6 address format");
             }
         } else if let Some(colon_pos) = host_port.find(':') {
             host = &host_port[..colon_pos];
-            port = host_port[colon_pos + 1..].parse().ok();
+            port = Some(
+                host_port[colon_pos + 1..]
+                    .parse::<u16>()
+                    .map_err(|_| "Invalid port")?,
+            );
         }
 
         if host.is_empty() {
@@ -157,4 +165,79 @@ pub fn parse_ports(input: &str) -> Result<Vec<u16>, String> {
     ports.sort_unstable();
     ports.dedup();
     Ok(ports)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_url_happy_paths() {
+        let p = Parser::parse("http://example.com").unwrap();
+        assert_eq!(
+            (p.scheme.as_str(), p.host.as_str(), p.port, p.path.as_str()),
+            ("http", "example.com", None, "/")
+        );
+
+        let p = Parser::parse("https://example.com:8443/a/b").unwrap();
+        assert_eq!(
+            (p.host.as_str(), p.port, p.path.as_str()),
+            ("example.com", Some(8443), "/a/b")
+        );
+
+        let p = Parser::parse("http://[::1]:8080/x").unwrap();
+        assert_eq!(
+            (p.host.as_str(), p.port, p.path.as_str()),
+            ("::1", Some(8080), "/x")
+        );
+
+        let p = Parser::parse("HTTPS://example.com").unwrap();
+        assert_eq!(p.host, "example.com");
+    }
+
+    #[test]
+    fn parse_url_rejects_invalid() {
+        assert!(Parser::parse("example.com").is_err());
+        assert!(Parser::parse("ftp://example.com").is_err());
+        assert!(Parser::parse("://example.com").is_err());
+        assert!(Parser::parse("http://example.com:abc/").is_err());
+        assert!(Parser::parse("http://example.com:99999/").is_err());
+        assert!(Parser::parse("http://[::1]:xx/").is_err());
+        assert!(Parser::parse("http://[::1/x").is_err());
+    }
+
+    #[test]
+    fn parse_ports_happy_paths() {
+        assert_eq!(parse_ports("80"), Ok(vec![80]));
+        assert_eq!(parse_ports("443,80,80,53"), Ok(vec![53, 80, 443]));
+        assert_eq!(parse_ports("20-22"), Ok(vec![20, 21, 22]));
+        assert_eq!(parse_ports("443,20-22,80"), Ok(vec![20, 21, 22, 80, 443]));
+        assert_eq!(parse_ports("[80, 443]"), Ok(vec![80, 443]));
+    }
+
+    #[test]
+    fn parse_ports_rejects_invalid() {
+        assert!(parse_ports("100-90").is_err());
+        assert!(parse_ports("70000").is_err());
+        assert!(parse_ports("65535-65536").is_err());
+        assert!(parse_ports("").is_err());
+        assert!(parse_ports("[]").is_err());
+    }
+
+    #[test]
+    fn multiple_destinations_parsing() {
+        assert_eq!(
+            parse_multiple_destinations("a.com, b.com ,c.com"),
+            vec!["a.com", "b.com", "c.com"]
+        );
+        assert_eq!(
+            parse_multiple_destinations("[a.com, b.com]"),
+            vec!["a.com", "b.com"]
+        );
+        assert_eq!(parse_multiple_destinations(" 1.1.1.1 "), vec!["1.1.1.1"]);
+        assert_eq!(
+            parse_multiple_destinations("a.com,,b.com,"),
+            vec!["a.com", "b.com"]
+        );
+    }
 }

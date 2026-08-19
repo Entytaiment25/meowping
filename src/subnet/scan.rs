@@ -11,7 +11,8 @@ use std::net::{IpAddr, SocketAddr};
 use std::thread;
 use std::time::Duration;
 
-pub(super) enum ProbeKind {
+#[derive(Clone, Copy)]
+pub enum ProbeKind {
     Tcp {
         port: u16,
         timeout_ms: u64,
@@ -29,6 +30,26 @@ pub(super) enum ProbeKind {
 }
 
 impl ProbeKind {
+    pub const fn tcp(port: u16, timeout_ms: u64) -> Self {
+        Self::Tcp { port, timeout_ms }
+    }
+
+    pub const fn udp(port: u16, timeout_ms: u64) -> Self {
+        Self::Udp {
+            port,
+            timeout: Duration::from_millis(timeout_ms),
+        }
+    }
+
+    pub const fn icmp(timeout_ms: u64, ttl: u8, ident: u16, payload: [u8; 24]) -> Self {
+        Self::Icmp {
+            timeout: Duration::from_millis(timeout_ms),
+            ttl,
+            ident,
+            payload,
+        }
+    }
+
     pub(super) const fn header_protocol(&self) -> &'static str {
         match self {
             Self::Tcp { .. } => "TCP",
@@ -248,7 +269,7 @@ fn print_empty_or_too_large(cfg: &ScanConfig, hosts: &[IpAddr]) -> bool {
     false
 }
 
-fn perform_subnet_scan(hosts: &[IpAddr], cfg: &ScanConfig) {
+fn scan_hosts(hosts: &[IpAddr], cfg: &ScanConfig) {
     if print_empty_or_too_large(cfg, hosts) {
         return;
     }
@@ -256,133 +277,40 @@ fn perform_subnet_scan(hosts: &[IpAddr], cfg: &ScanConfig) {
     perform_subnet_watch(hosts, cfg);
 }
 
-fn run_v4_subnet_scan(subnet: Ipv4Subnet, kind: ProbeKind, rounds: Option<usize>, minimal: bool) {
-    let hosts: Vec<IpAddr> = subnet.iter_hosts().map(IpAddr::V4).collect();
-    perform_subnet_scan(
-        &hosts,
-        &ScanConfig {
-            notation: subnet.notation(),
-            host_count: subnet.host_count(),
-            too_large: false,
-            kind,
-            rounds,
-            minimal,
-        },
-    );
+#[derive(Clone, Copy)]
+pub enum Subnet {
+    V4(Ipv4Subnet),
+    V6(Ipv6Subnet),
 }
 
-fn run_v6_subnet_scan(subnet: &Ipv6Subnet, kind: ProbeKind, rounds: Option<usize>, minimal: bool) {
-    let host_count = subnet.host_count();
-    let hosts: Vec<IpAddr> = subnet.iter_hosts().map(IpAddr::V6).collect();
-    perform_subnet_scan(
+pub fn perform_subnet_scan(subnet: Subnet, kind: ProbeKind, rounds: Option<usize>, minimal: bool) {
+    let (hosts, notation, host_count, too_large) = match subnet {
+        Subnet::V4(s) => (
+            s.iter_hosts().map(IpAddr::V4).collect::<Vec<_>>(),
+            s.notation(),
+            s.host_count(),
+            false,
+        ),
+        Subnet::V6(s) => {
+            let host_count = s.host_count();
+            (
+                s.iter_hosts().map(IpAddr::V6).collect::<Vec<_>>(),
+                s.notation(),
+                host_count,
+                host_count == u128::MAX,
+            )
+        }
+    };
+
+    scan_hosts(
         &hosts,
         &ScanConfig {
-            notation: subnet.notation(),
+            notation,
             host_count,
-            too_large: host_count == u128::MAX,
+            too_large,
             kind,
             rounds,
             minimal,
         },
-    );
-}
-
-pub fn perform_tcp_subnet_scan(
-    subnet: Ipv4Subnet,
-    port: u16,
-    timeout_ms: u64,
-    rounds: Option<usize>,
-    minimal: bool,
-) {
-    run_v4_subnet_scan(subnet, ProbeKind::Tcp { port, timeout_ms }, rounds, minimal);
-}
-
-pub fn perform_icmp_subnet_scan(
-    subnet: Ipv4Subnet,
-    timeout_ms: u64,
-    ttl: u8,
-    ident: u16,
-    rounds: Option<usize>,
-    payload: &[u8; 24],
-    minimal: bool,
-) {
-    run_v4_subnet_scan(
-        subnet,
-        ProbeKind::Icmp {
-            timeout: Duration::from_millis(timeout_ms),
-            ttl,
-            ident,
-            payload: *payload,
-        },
-        rounds,
-        minimal,
-    );
-}
-
-pub fn perform_tcp_ipv6_subnet_scan(
-    subnet: &Ipv6Subnet,
-    port: u16,
-    timeout_ms: u64,
-    rounds: Option<usize>,
-    minimal: bool,
-) {
-    run_v6_subnet_scan(subnet, ProbeKind::Tcp { port, timeout_ms }, rounds, minimal);
-}
-
-pub fn perform_icmp_ipv6_subnet_scan(
-    subnet: &Ipv6Subnet,
-    timeout_ms: u64,
-    ttl: u8,
-    ident: u16,
-    rounds: Option<usize>,
-    payload: &[u8; 24],
-    minimal: bool,
-) {
-    run_v6_subnet_scan(
-        subnet,
-        ProbeKind::Icmp {
-            timeout: Duration::from_millis(timeout_ms),
-            ttl,
-            ident,
-            payload: *payload,
-        },
-        rounds,
-        minimal,
-    );
-}
-
-pub fn perform_udp_subnet_scan(
-    subnet: Ipv4Subnet,
-    port: u16,
-    timeout_ms: u64,
-    rounds: Option<usize>,
-    minimal: bool,
-) {
-    run_v4_subnet_scan(
-        subnet,
-        ProbeKind::Udp {
-            port,
-            timeout: Duration::from_millis(timeout_ms),
-        },
-        rounds,
-        minimal,
-    );
-}
-
-pub fn perform_udp_ipv6_subnet_scan(
-    subnet: &Ipv6Subnet,
-    port: u16,
-    timeout_ms: u64,
-    rounds: Option<usize>,
-    minimal: bool,
-) {
-    run_v6_subnet_scan(
-        subnet,
-        ProbeKind::Udp {
-            port,
-            timeout: Duration::from_millis(timeout_ms),
-        },
-        rounds,
-        minimal,
     );
 }

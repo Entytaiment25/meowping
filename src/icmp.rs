@@ -1,8 +1,7 @@
 use crate::colors::Colorize;
-use crate::output::{color_time, micros_to_ms, print_statistics, print_with_prefix};
-use std::collections::VecDeque;
+use crate::output::{PingStats, color_time, micros_to_ms, print_statistics, print_with_prefix};
 use std::error::Error;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, Instant};
 
 pub const MEOW_ICMP_PAYLOAD: [u8; 24] = [
@@ -17,26 +16,25 @@ pub const CLASSIC_ICMP_PAYLOAD: [u8; 24] = [
 pub const DEFAULT_TTL: u8 = 64;
 pub const DEFAULT_IDENT: u16 = 0;
 
-fn resolve_ip(host: &str) -> std::io::Result<IpAddr> {
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return Ok(ip);
-    }
-    let mut addrs = (host, 0).to_socket_addrs()?;
-    if let Some(addr) = addrs.next() {
-        return Ok(addr.ip());
-    }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::AddrNotAvailable,
-        "No IP address found for host",
-    ))
-}
-
 #[cfg(unix)]
 mod platform {
     use super::{Duration, Instant, Ipv4Addr, Ipv6Addr};
     use std::io;
     use std::mem;
     use std::os::fd::RawFd;
+
+    fn retry_on_eintr(mut f: impl FnMut() -> libc::ssize_t) -> io::Result<libc::ssize_t> {
+        loop {
+            let result = f();
+            if result >= 0 {
+                return Ok(result);
+            }
+            let err = io::Error::last_os_error();
+            if err.kind() != io::ErrorKind::Interrupted {
+                return Err(err);
+            }
+        }
+    }
 
     fn socklen_of<T>() -> io::Result<libc::socklen_t> {
         libc::socklen_t::try_from(mem::size_of::<T>())
@@ -157,7 +155,7 @@ mod platform {
 
         let identifier = ident;
 
-        let mut packet = vec![0u8; 8 + payload.len()];
+        let mut packet = [0u8; 32];
         packet[0] = 128;
         packet[1] = 0;
         packet[2] = 0;
@@ -166,7 +164,7 @@ mod platform {
         packet[5] = (identifier & 0xff) as u8;
         packet[6] = (seq >> 8) as u8;
         packet[7] = (seq & 0xff) as u8;
-        packet[8..8 + payload.len()].copy_from_slice(payload);
+        packet[8..].copy_from_slice(payload);
 
         let mut addr: libc::sockaddr_in6 = unsafe { mem::zeroed() };
         addr.sin6_family = sa_family(libc::AF_INET6)?;
@@ -179,7 +177,7 @@ mod platform {
         let addr_len = socklen_of::<libc::sockaddr_in6>()?;
 
         let send_time = Instant::now();
-        let sent = unsafe {
+        retry_on_eintr(|| unsafe {
             libc::sendto(
                 fd.fd,
                 packet.as_ptr().cast::<libc::c_void>(),
@@ -188,16 +186,13 @@ mod platform {
                 addr_ptr,
                 addr_len,
             )
-        };
-        if sent < 0 {
-            return Err(io::Error::last_os_error());
-        }
+        })?;
 
-        let mut buf = vec![0u8; 1500];
+        let mut buf = [0u8; 1500];
         let mut from: libc::sockaddr_in6 = unsafe { mem::zeroed() };
         let mut from_len = socklen_of::<libc::sockaddr_in6>()?;
 
-        let received = unsafe {
+        let received = retry_on_eintr(|| unsafe {
             libc::recvfrom(
                 fd.fd,
                 buf.as_mut_ptr().cast::<libc::c_void>(),
@@ -206,10 +201,7 @@ mod platform {
                 (&raw mut from).cast::<libc::sockaddr>(),
                 &raw mut from_len,
             )
-        };
-        if received < 0 {
-            return Err(io::Error::last_os_error());
-        }
+        })?;
         let rtt = send_time.elapsed();
 
         let n = received.cast_unsigned();
@@ -240,13 +232,15 @@ mod platform {
         ident: u16,
         payload: &[u8; 24],
     ) -> io::Result<(usize, Duration)> {
-        let is_linux = cfg!(target_os = "linux");
-        let sock_ty = if is_linux {
-            libc::SOCK_DGRAM
+        let fd_dgram = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, libc::IPPROTO_ICMP) };
+        let (fd_raw, is_dgram) = if fd_dgram >= 0 {
+            (fd_dgram, true)
         } else {
-            libc::SOCK_RAW
+            (
+                unsafe { libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_ICMP) },
+                false,
+            )
         };
-        let fd_raw = unsafe { libc::socket(libc::AF_INET, sock_ty, libc::IPPROTO_ICMP) };
         if fd_raw < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -257,7 +251,7 @@ mod platform {
 
         let identifier = ident;
 
-        let mut packet = vec![0u8; 8 + payload.len()];
+        let mut packet = [0u8; 32];
         packet[0] = 8;
         packet[1] = 0;
         packet[2] = 0;
@@ -266,7 +260,7 @@ mod platform {
         packet[5] = (identifier & 0xff) as u8;
         packet[6] = (seq >> 8) as u8;
         packet[7] = (seq & 0xff) as u8;
-        packet[8..8 + payload.len()].copy_from_slice(payload);
+        packet[8..].copy_from_slice(payload);
 
         let csum = icmp_checksum(&packet);
         packet[2] = (csum >> 8) as u8;
@@ -283,7 +277,7 @@ mod platform {
         let addr_len = socklen_of::<libc::sockaddr_in>()?;
 
         let send_time = Instant::now();
-        let sent = unsafe {
+        retry_on_eintr(|| unsafe {
             libc::sendto(
                 fd.fd,
                 packet.as_ptr().cast::<libc::c_void>(),
@@ -292,16 +286,13 @@ mod platform {
                 addr_ptr,
                 addr_len,
             )
-        };
-        if sent < 0 {
-            return Err(io::Error::last_os_error());
-        }
+        })?;
 
-        let mut buf = vec![0u8; 1500];
+        let mut buf = [0u8; 1500];
         let mut from: libc::sockaddr_in = unsafe { mem::zeroed() };
         let mut from_len = socklen_of::<libc::sockaddr_in>()?;
 
-        let received = unsafe {
+        let received = retry_on_eintr(|| unsafe {
             libc::recvfrom(
                 fd.fd,
                 buf.as_mut_ptr().cast::<libc::c_void>(),
@@ -310,10 +301,7 @@ mod platform {
                 (&raw mut from).cast::<libc::sockaddr>(),
                 &raw mut from_len,
             )
-        };
-        if received < 0 {
-            return Err(io::Error::last_os_error());
-        }
+        })?;
         let rtt = send_time.elapsed();
 
         let n = received.cast_unsigned();
@@ -335,13 +323,34 @@ mod platform {
         let icmp_code = icmp[1];
         let r_id = u16::from_be_bytes([icmp[4], icmp[5]]);
         let r_seq = u16::from_be_bytes([icmp[6], icmp[7]]);
-
-        if icmp_type != 0 || icmp_code != 0 || !is_linux && (r_id != identifier || r_seq != seq) {
+        if icmp_type != 0 || icmp_code != 0 || (!is_dgram && (r_id != identifier || r_seq != seq)) {
             return Err(io::Error::other("Unexpected ICMP reply"));
         }
 
         let bytes = n - off;
         Ok((bytes, rtt))
+    }
+
+    #[cfg(test)]
+    mod checksum_tests {
+        use super::icmp_checksum;
+
+        #[test]
+        fn rfc1071_worked_example() {
+            let data = [0x00u8, 0x01, 0xf2, 0x03, 0xf4, 0xf5, 0xf6, 0xf7];
+            assert_eq!(icmp_checksum(&data), 0x220d);
+        }
+
+        #[test]
+        fn odd_length_is_padded() {
+            assert_eq!(icmp_checksum(&[0x01]), 0xfeff);
+        }
+
+        #[test]
+        fn echo_packet_checksum_matches_on_wire_value() {
+            let packet = [0x08u8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+            assert_eq!(icmp_checksum(&packet), 0xf7fe);
+        }
     }
 }
 
@@ -379,7 +388,7 @@ mod platform {
             }
             let handle = HandleGuard(handle as isize);
 
-            let mut reply_buf = vec![0u8; mem::size_of::<ICMP_ECHO_REPLY>() + payload.len() + 8];
+            let mut reply_buf = [0u8; mem::size_of::<ICMP_ECHO_REPLY>() + 24 + 8];
 
             let start = Instant::now();
             let num = IcmpSendEcho(
@@ -464,8 +473,7 @@ mod platform {
             };
 
             // ICMPV6_ECHO_REPLY_LH (36 bytes) + payload + 8 bytes for ICMP error message + IO_STATUS_BLOCK (16 bytes on 64-bit)
-            let reply_size = 36 + payload.len() + 8 + 32;
-            let mut reply_buf = vec![0u8; reply_size];
+            let mut reply_buf = [0u8; 36 + 24 + 8 + 32];
 
             let start = Instant::now();
             let num = Icmp6SendEcho2(
@@ -479,7 +487,7 @@ mod platform {
                 u16::try_from(payload.len()).unwrap_or(u16::MAX),
                 0, // requestoptions = NULL
                 reply_buf.as_mut_ptr(),
-                u32::try_from(reply_size).unwrap_or(u32::MAX),
+                u32::try_from(reply_buf.len()).unwrap_or(u32::MAX),
                 u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX),
             );
             let rtt = start.elapsed();
@@ -516,11 +524,10 @@ pub fn perform_icmp(
     payload: &[u8; 24],
     minimal: bool,
 ) -> Result<(), Box<dyn Error>> {
-    let ip = resolve_ip(destination)?;
+    let ip = crate::tcp::resolve_ip(destination, 0)?.ip();
     let timeout = Duration::from_millis(timeout_ms);
 
-    let mut times: VecDeque<u128> = VecDeque::new();
-    let mut successes = 0usize;
+    let mut stats = PingStats::default();
     let mut seq: u16 = 1;
 
     for attempt_idx in 0..count {
@@ -531,8 +538,7 @@ pub fn perform_icmp(
 
         match result {
             Ok((bytes, rtt)) => {
-                successes += 1;
-                times.push_back(rtt.as_micros());
+                stats.record(true, Some(rtt.as_micros()));
                 let time_ms = rtt.as_secs_f64() * 1000.0;
                 let time_str = color_time(time_ms);
                 let msg = format!(
@@ -546,15 +552,21 @@ pub fn perform_icmp(
                 );
                 print_with_prefix(minimal, &msg);
             }
-            Err(_e) => {
-                times.push_back(0);
-                let msg = format!(
-                    "Request timeout for icmp_seq {} time={:.2}ms TTL={} Identifier={}",
-                    display_seq,
-                    micros_to_ms(elapsed_us),
-                    ttl,
-                    ident
-                );
+            Err(e) => {
+                stats.record(false, None);
+                let msg = if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    format!(
+                        "ICMP socket permission denied for icmp_seq {display_seq}: try running with sudo ({e})"
+                    )
+                } else {
+                    format!(
+                        "Request timeout for icmp_seq {} time={:.2}ms TTL={} Identifier={}",
+                        display_seq,
+                        micros_to_ms(elapsed_us),
+                        ttl,
+                        ident
+                    )
+                };
                 let message = msg.red();
                 print_with_prefix(minimal, &message);
             }
@@ -566,6 +578,6 @@ pub fn perform_icmp(
         seq = seq.wrapping_add(1);
     }
 
-    print_statistics("ICMP", count, successes, &times);
+    print_statistics("ICMP", &stats);
     Ok(())
 }

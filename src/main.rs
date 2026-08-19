@@ -23,11 +23,7 @@ use dns::perform_dns;
 use http_check::perform_http_check;
 use icmp::{CLASSIC_ICMP_PAYLOAD, DEFAULT_IDENT, DEFAULT_TTL, MEOW_ICMP_PAYLOAD, perform_icmp};
 use parser::{Extracted, Parser, parse_multiple_destinations, parse_ports};
-use subnet::{
-    Ipv4Subnet, Ipv6Subnet, perform_icmp_ipv6_subnet_scan, perform_icmp_subnet_scan,
-    perform_tcp_ipv6_subnet_scan, perform_tcp_subnet_scan, perform_udp_ipv6_subnet_scan,
-    perform_udp_subnet_scan,
-};
+use subnet::{Ipv4Subnet, Ipv6Subnet, ProbeKind, Subnet, perform_subnet_scan};
 use tcp::{perform_tcp, perform_tcp_multi_scan};
 use udp::{perform_udp, perform_udp_multi_scan};
 
@@ -65,14 +61,21 @@ fn handle_http_check(
     }
 }
 
-enum SubnetRef<'a> {
-    V4(Ipv4Subnet),
-    V6(&'a Ipv6Subnet),
+const fn probe_kind_for(
+    port: Option<u16>,
+    udp: bool,
+    timeout: u64,
+    payload: [u8; 24],
+) -> ProbeKind {
+    match port {
+        Some(p) if udp => ProbeKind::udp(p, timeout),
+        Some(p) => ProbeKind::tcp(p, timeout),
+        None => ProbeKind::icmp(timeout, DEFAULT_TTL, DEFAULT_IDENT, payload),
+    }
 }
 
-#[inline(never)]
 fn handle_subnet_scan(
-    subnet: SubnetRef<'_>,
+    subnet: Subnet,
     port: Option<u16>,
     udp: bool,
     timeout: u64,
@@ -80,43 +83,12 @@ fn handle_subnet_scan(
     minimal: bool,
     payload: &[u8; 24],
 ) {
-    let Some(p) = port else {
-        return match subnet {
-            SubnetRef::V4(s) => perform_icmp_subnet_scan(
-                s,
-                timeout,
-                DEFAULT_TTL,
-                DEFAULT_IDENT,
-                rounds,
-                payload,
-                minimal,
-            ),
-            SubnetRef::V6(s) => perform_icmp_ipv6_subnet_scan(
-                s,
-                timeout,
-                DEFAULT_TTL,
-                DEFAULT_IDENT,
-                rounds,
-                payload,
-                minimal,
-            ),
-        };
-    };
-
-    match (subnet, udp) {
-        (SubnetRef::V4(s), true) => {
-            perform_udp_subnet_scan(s, p, timeout, rounds, minimal);
-        }
-        (SubnetRef::V4(s), false) => {
-            perform_tcp_subnet_scan(s, p, timeout, rounds, minimal);
-        }
-        (SubnetRef::V6(s), true) => {
-            perform_udp_ipv6_subnet_scan(s, p, timeout, rounds, minimal);
-        }
-        (SubnetRef::V6(s), false) => {
-            perform_tcp_ipv6_subnet_scan(s, p, timeout, rounds, minimal);
-        }
-    }
+    perform_subnet_scan(
+        subnet,
+        probe_kind_for(port, udp, timeout, *payload),
+        rounds,
+        minimal,
+    );
 }
 
 #[inline(never)]
@@ -132,12 +104,7 @@ fn resolve_destination(dest: &str, minimal: bool) -> Option<String> {
     } else {
         match Parser::extract_url(dest) {
             Extracted::Error => {
-                let message = format!("DNS Lookup of domain failed: Invalid host or URL: {dest}");
-                if minimal {
-                    println!("{message}");
-                } else {
-                    println!("{} {}", "[MEOWPING]".magenta(), message);
-                }
+                output::print_resolution_failure(dest, minimal);
                 None
             }
             Extracted::Success(host) => Some(host),
@@ -149,7 +116,7 @@ fn resolve_destination(dest: &str, minimal: bool) -> Option<String> {
 fn handle_multi_icmp(
     destinations: &[String],
     timeout: u64,
-    count: usize,
+    attempts: usize,
     minimal: bool,
     payload: &[u8; 24],
 ) {
@@ -167,7 +134,7 @@ fn handle_multi_icmp(
                 timeout,
                 DEFAULT_TTL,
                 DEFAULT_IDENT,
-                count,
+                attempts,
                 payload,
                 minimal,
             );
@@ -187,8 +154,9 @@ fn handle_single_destination(
     no_asn: bool,
     payload: &[u8; 24],
 ) -> Result<(), Box<dyn Error>> {
-    let destination = resolve_destination(destination_input, minimal)
-        .ok_or("DNS Lookup of domain failed: Invalid host or URL")?;
+    let Some(destination) = resolve_destination(destination_input, minimal) else {
+        return Ok(());
+    };
 
     match port {
         Some(p) => {
@@ -256,6 +224,22 @@ fn parse_count(args: &mut Arguments) -> Result<(usize, bool), Box<dyn Error>> {
         Ok(Some(count)) => Ok((count, true)),
         Ok(None) => Ok((65_535, false)),
         Err(_) => Err("Failed to parse count argument".into()),
+    }
+}
+
+fn validate_timeout(timeout: u64) -> Result<(), String> {
+    if timeout == 0 {
+        Err("timeout must be at least 1ms (-t/--timeout)".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+const fn compute_per_host_attempts(scan_like: bool, explicit_count: bool, count: usize) -> usize {
+    if scan_like && !explicit_count {
+        1
+    } else {
+        count
     }
 }
 
@@ -353,7 +337,7 @@ fn run_host_dispatch(ctx: &ProbeCtx<'_>, port: Option<u16>) -> Result<(), Box<dy
 
     if let Some(subnet) = ctx.subnet_target {
         handle_subnet_scan(
-            SubnetRef::V4(subnet),
+            Subnet::V4(subnet),
             port,
             ctx.udp,
             ctx.timeout,
@@ -365,7 +349,7 @@ fn run_host_dispatch(ctx: &ProbeCtx<'_>, port: Option<u16>) -> Result<(), Box<dy
     }
     if let Some(ipv6_subnet) = ctx.ipv6_subnet_target {
         handle_subnet_scan(
-            SubnetRef::V6(&ipv6_subnet),
+            Subnet::V6(ipv6_subnet),
             port,
             ctx.udp,
             ctx.timeout,
@@ -381,7 +365,7 @@ fn run_host_dispatch(ctx: &ProbeCtx<'_>, port: Option<u16>) -> Result<(), Box<dy
             None => handle_multi_icmp(
                 ctx.destinations,
                 ctx.timeout,
-                ctx.count,
+                ctx.per_host_attempts,
                 ctx.minimal,
                 ctx.payload,
             ),
@@ -390,7 +374,7 @@ fn run_host_dispatch(ctx: &ProbeCtx<'_>, port: Option<u16>) -> Result<(), Box<dy
                     ctx.destinations,
                     p,
                     ctx.timeout,
-                    ctx.count,
+                    ctx.per_host_attempts,
                     ctx.minimal,
                     ctx.no_asn,
                 );
@@ -400,7 +384,7 @@ fn run_host_dispatch(ctx: &ProbeCtx<'_>, port: Option<u16>) -> Result<(), Box<dy
                     ctx.destinations,
                     p,
                     ctx.timeout,
-                    ctx.count,
+                    ctx.per_host_attempts,
                     ctx.minimal,
                     ctx.no_asn,
                 );
@@ -431,7 +415,7 @@ fn run_multiport_dispatch(ctx: &ProbeCtx<'_>, port_list: &[u16]) -> Result<(), B
         port_list,
         ctx.udp,
         ctx.timeout,
-        ctx.count,
+        ctx.per_host_attempts,
         ctx.minimal,
         ctx.no_asn,
     );
@@ -471,20 +455,17 @@ fn resolve_targets(destination_input: &str) -> ResolvedTargets {
     }
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    #[cfg(target_os = "windows")]
-    fix_ansicolor::enable_ansi_support();
+#[allow(clippy::struct_excessive_bools)]
+struct SimpleFlags {
+    minimal: bool,
+    http_check: bool,
+    no_asn: bool,
+    udp: bool,
+    dns_server: std::net::SocketAddr,
+    payload: &'static [u8; 24],
+}
 
-    let mut args = Arguments::from_env();
-
-    if args.contains(["-h", "--help"]) {
-        output::print_help();
-        return Ok(());
-    }
-
-    let cfg = load_config(&mut args)?;
-    let cfg = cfg.as_ref();
-
+fn parse_simple_flags(args: &Arguments, cfg: Option<&config::Config>) -> SimpleFlags {
     let minimal =
         args.contains(["-m", "--minimal"]) || cfg.and_then(|c| c.minimal).unwrap_or(false);
     let http_check = args.contains(["-s", "--http"]);
@@ -493,11 +474,64 @@ fn main() -> Result<(), Box<dyn Error>> {
     let dns_server = cfg
         .and_then(|c| c.dns_server)
         .unwrap_or(dns::DEFAULT_DNS_SERVER);
-    let payload: &[u8; 24] = if cfg.and_then(|c| c.classic_payload).unwrap_or(false) {
+    let payload: &'static [u8; 24] = if cfg.and_then(|c| c.classic_payload).unwrap_or(false) {
         &CLASSIC_ICMP_PAYLOAD
     } else {
         &MEOW_ICMP_PAYLOAD
     };
+    SimpleFlags {
+        minimal,
+        http_check,
+        no_asn,
+        udp,
+        dns_server,
+        payload,
+    }
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    #[cfg(target_os = "windows")]
+    fix_ansicolor::enable_ansi_support();
+
+    colors::init_colors();
+
+    let mut args = Arguments::from_env();
+
+    if args.contains(["-h", "--help"]) {
+        output::print_help();
+        return Ok(());
+    }
+
+    if args.contains(["-V", "--version"]) {
+        println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
+    let cfg = load_config(&mut args)?;
+    let cfg = cfg.as_ref();
+
+    let SimpleFlags {
+        minimal,
+        http_check,
+        no_asn,
+        udp,
+        dns_server,
+        payload,
+    } = parse_simple_flags(&args, cfg);
+
+    let timeout = args
+        .opt_value_from_str(["-t", "--timeout"])
+        .map_err(|_| "Failed to parse timeout argument")?
+        .unwrap_or(1000);
+    validate_timeout(timeout).map_err(|e| -> Box<dyn Error> { e.into() })?;
+
+    let (count, explicit_count) = parse_count(&mut args)?;
+
+    let ports: Option<Vec<u16>> = args
+        .opt_value_from_str::<String, 2>(["-p", "--port"])
+        .map_err(|_| "Failed to parse port argument")?
+        .map(|s| parse_ports(&s))
+        .transpose()?;
 
     let destination_input = read_destination(&mut args)?;
     let ResolvedTargets {
@@ -507,18 +541,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         ipv6_subnet_target,
     } = resolve_targets(&destination_input);
 
-    let timeout = args
-        .opt_value_from_str(["-t", "--timeout"])
-        .map_err(|_| "Failed to parse timeout argument")?
-        .unwrap_or(1000);
-
-    let (count, explicit_count) = parse_count(&mut args)?;
-    let per_host_attempts: usize =
-        if (subnet_target.is_some() || ipv6_subnet_target.is_some()) && !explicit_count {
-            1
-        } else {
-            count
-        };
+    let scan_like = is_multi
+        || subnet_target.is_some()
+        || ipv6_subnet_target.is_some()
+        || ports.as_ref().is_some_and(|p| p.len() > 1);
+    let per_host_attempts: usize = compute_per_host_attempts(scan_like, explicit_count, count);
 
     if !minimal {
         output::print_welcome();
@@ -557,12 +584,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    let ports: Option<Vec<u16>> = args
-        .opt_value_from_str::<String, 2>(["-p", "--port"])
-        .map_err(|_| "Failed to parse port argument")?
-        .map(|s| parse_ports(&s))
-        .transpose()?;
-
     if udp && ports.is_none() {
         return Err("UDP probing requires a port (use -p/--port with --udp)".into());
     }
@@ -587,4 +608,25 @@ fn main() -> Result<(), Box<dyn Error>> {
     run_probe_dispatch(&ctx)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_per_host_attempts_truth_table() {
+        assert_eq!(compute_per_host_attempts(true, false, 65_535), 1);
+        assert_eq!(compute_per_host_attempts(false, false, 65_535), 65_535);
+        assert_eq!(compute_per_host_attempts(false, false, 10), 10);
+        assert_eq!(compute_per_host_attempts(true, true, 7), 7);
+        assert_eq!(compute_per_host_attempts(false, true, 7), 7);
+    }
+
+    #[test]
+    fn zero_timeout_is_rejected() {
+        assert!(validate_timeout(0).is_err());
+        assert!(validate_timeout(1).is_ok());
+        assert!(validate_timeout(1000).is_ok());
+    }
 }

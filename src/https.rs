@@ -1,8 +1,7 @@
 use crate::parser::Parser;
 use native_tls::TlsConnector;
 use std::io::{Read, Write};
-use std::net::TcpStream;
-use std::net::ToSocketAddrs;
+use std::net::{IpAddr, TcpStream};
 use std::time::Duration;
 
 const DEFAULT_HEADERS: &[&str] = &[
@@ -59,20 +58,26 @@ fn connect_tcp(
     port: u16,
     timeout: u64,
 ) -> Result<TcpStream, Box<dyn std::error::Error>> {
-    let addr = (host, port)
-        .to_socket_addrs()?
-        .next()
-        .ok_or("Invalid address")?;
-    Ok(TcpStream::connect_timeout(
-        &addr,
-        Duration::from_millis(timeout),
-    )?)
+    let addr = crate::tcp::resolve_ip(host, port)?;
+    let stream = TcpStream::connect_timeout(&addr, Duration::from_millis(timeout))?;
+    let dur = Some(Duration::from_millis(timeout.max(1)));
+    stream.set_read_timeout(dur)?;
+    stream.set_write_timeout(dur)?;
+    Ok(stream)
 }
 
 fn read_response(mut stream: impl Read) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let mut response = Vec::new();
-    stream.read_to_end(&mut response)?;
-    Ok(response)
+    match stream.read_to_end(&mut response) {
+        Ok(_) => Ok(response),
+        Err(e)
+            if e.kind() == std::io::ErrorKind::WouldBlock
+                || e.kind() == std::io::ErrorKind::TimedOut =>
+        {
+            Err("Connection timed out".into())
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 fn fetch_response(
@@ -97,9 +102,10 @@ fn fetch_response(
     }
 }
 
-fn is_https(url: &str, host: &str) -> Result<bool, Box<dyn std::error::Error>> {
-    let https = url.starts_with("https://");
-    if https && (host == "localhost" || host == "127.0.0.1") {
+fn is_https(scheme: &str, host: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    let https = scheme.eq_ignore_ascii_case("https");
+    let loopback = host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback());
+    if https && (loopback || host.eq_ignore_ascii_case("localhost")) {
         return Err(
             "Cannot establish HTTPS connection: Server only supports HTTP. Use http:// instead."
                 .into(),
@@ -120,7 +126,7 @@ fn fetch_url(
     let parsed_url = Parser::parse(url)?;
     let host = &parsed_url.host;
     let path = &parsed_url.path;
-    let https = is_https(url, host)?;
+    let https = is_https(&parsed_url.scheme, host)?;
     let port = parsed_url.port.unwrap_or_else(|| default_port(https));
     fetch_response(host, port, path, timeout, headers, https)
 }
@@ -135,4 +141,35 @@ pub fn get_status(
 
 pub fn get(url: &str, timeout: u64) -> Result<String, Box<dyn std::error::Error>> {
     parse_http_body(&fetch_url(url, timeout, &[])?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+    use std::time::Instant;
+
+    #[test]
+    fn unresponsive_server_is_bounded_by_timeout() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback listener");
+        let port = listener.local_addr().expect("local addr").port();
+        std::thread::spawn(move || {
+            for conn in listener.incoming() {
+                match conn {
+                    Ok(conn) => std::mem::forget(conn),
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let url = format!("http://127.0.0.1:{port}/");
+        let start = Instant::now();
+        let result = get_status(&url, 300, &[]);
+        let elapsed = start.elapsed();
+        assert!(result.is_err(), "unresponsive server must produce an error");
+        assert!(
+            elapsed.as_secs() < 5,
+            "request must be bounded by the timeout, took {elapsed:?}"
+        );
+    }
 }

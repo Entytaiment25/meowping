@@ -1,6 +1,36 @@
 use crate::colors::{Colorize, HyperLink};
-use std::collections::VecDeque;
 use std::time::Duration;
+
+#[derive(Default)]
+pub struct PingStats {
+    attempts: usize,
+    successes: usize,
+    min_us: Option<u128>,
+    max_us: u128,
+    sum_us: u128,
+}
+
+impl PingStats {
+    pub fn record(&mut self, success: bool, rtt: Option<u128>) {
+        self.attempts = self.attempts.saturating_add(1);
+        if success {
+            self.successes += 1;
+        }
+        if let Some(us) = rtt {
+            self.min_us = Some(self.min_us.map_or(us, |m| m.min(us)));
+            self.max_us = self.max_us.max(us);
+            self.sum_us = self.sum_us.saturating_add(us);
+        }
+    }
+
+    pub const fn attempts(&self) -> usize {
+        self.attempts
+    }
+
+    pub const fn successes(&self) -> usize {
+        self.successes
+    }
+}
 
 pub fn format_with_prefix(minimal: bool, message: &str) -> String {
     if minimal {
@@ -14,23 +44,27 @@ pub fn print_with_prefix(minimal: bool, message: &str) {
     println!("{}", format_with_prefix(minimal, message));
 }
 
+pub fn print_resolution_failure(host: &str, minimal: bool) {
+    let message = format!("DNS Lookup of domain failed: Invalid host or URL: {host}");
+    print_with_prefix(minimal, &message);
+}
+
 pub fn micros_to_ms(micros: u128) -> f64 {
     Duration::from_micros(u64::try_from(micros).unwrap_or(u64::MAX)).as_secs_f64() * 1000.0
 }
 
-pub fn print_statistics(protocol: &str, count: usize, successes: usize, times: &VecDeque<u128>) {
-    let failed = count - successes;
+pub fn print_statistics(protocol: &str, stats: &PingStats) {
+    let count = stats.attempts();
+    let successes = stats.successes();
+    let failed = count.saturating_sub(successes);
 
-    let good_times: Vec<u128> = times.iter().copied().filter(|&t| t > 0).collect();
-
-    let (min_time, max_time, avg_time) = if good_times.is_empty() {
+    let (min_time, max_time, avg_time) = if successes == 0 {
         (0.0, 0.0, 0.0)
     } else {
-        let min = good_times.iter().copied().min().map_or(0.0, micros_to_ms);
-        let max = good_times.iter().copied().max().map_or(0.0, micros_to_ms);
-        let total_ms: f64 = good_times.iter().copied().map(micros_to_ms).sum();
-        let sample_count = f64::from(u32::try_from(good_times.len()).unwrap_or(u32::MAX));
-        let avg = total_ms / sample_count;
+        let min = micros_to_ms(stats.min_us.unwrap_or(0));
+        let max = micros_to_ms(stats.max_us);
+        let sample_count = f64::from(u32::try_from(successes).unwrap_or(u32::MAX));
+        let avg = micros_to_ms(stats.sum_us) / sample_count;
         (min, max, avg)
     };
 
@@ -81,11 +115,12 @@ pub fn print_help() {
     );
     println!("\n{}:", "Options".bright_blue());
     println!("    -h, --help                Prints the Help Menu");
+    println!("    -V, --version             Prints the version");
     println!(
         "    -p, --port <port(s)>     Port to probe (default: ICMP). Accepts a single port, a comma list (53,80,443), or a range (20-25)"
     );
     println!(
-        "    -t, --timeout <timeout>   Set the timeout for each connection attempt in milliseconds (default: 1000ms)"
+        "    -t, --timeout <timeout>   Set the timeout for each connection attempt in milliseconds (default: 1000ms, minimum: 1ms)"
     );
     println!(
         "    -c, --count <count>       Set the number of connection attempts (default: 65535)"

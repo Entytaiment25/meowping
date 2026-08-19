@@ -1,7 +1,7 @@
 use crate::colors::Colorize;
-use crate::output::{color_time, micros_to_ms, print_statistics, print_with_prefix};
+use crate::output::{PingStats, color_time, print_statistics};
 use crate::tcp::{fetch_asn, resolve_ip};
-use std::collections::{HashSet, VecDeque};
+use std::borrow::Cow;
 use std::io::ErrorKind;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::thread::sleep;
@@ -32,11 +32,11 @@ pub enum ProbeOutcome {
     NoResponse,
 }
 
-pub fn probe_payload(port: u16) -> Vec<u8> {
+pub const fn probe_payload(port: u16) -> Cow<'static, [u8]> {
     match port {
-        53 => DNS_QUERY.to_vec(),
-        123 => NTP_REQUEST.to_vec(),
-        _ => vec![0x00],
+        53 => Cow::Borrowed(&DNS_QUERY),
+        123 => Cow::Borrowed(&NTP_REQUEST),
+        _ => Cow::Borrowed(&[0x00]),
     }
 }
 
@@ -174,8 +174,7 @@ pub fn perform_udp(
     let payload = probe_payload(port);
     let timeout_dur = Duration::from_millis(timeout);
 
-    let mut times: VecDeque<u128> = VecDeque::new();
-    let mut successes = 0usize;
+    let mut stats = PingStats::default();
 
     for attempt_idx in 0..count {
         let outcome = udp_probe_once(ip_lookup, &payload, timeout_dur);
@@ -183,64 +182,21 @@ pub fn perform_udp(
         let entry = format_udp_status(ip_lookup.ip(), &asn, port, &outcome, minimal);
         println!("{entry}");
 
-        if is_open {
-            successes += 1;
-            if let ProbeOutcome::Open { rtt, .. } = outcome {
-                times.push_back(rtt.as_micros());
-            }
-        } else {
-            times.push_back(0);
-        }
+        stats.record(is_open, outcome_rtt(&outcome));
 
         if attempt_idx + 1 != count {
             sleep(Duration::from_secs(1));
         }
     }
 
-    print_statistics("UDP", count, successes, &times);
+    print_statistics("UDP", &stats);
     Ok(())
 }
 
-fn udp_multi_entry(
-    host: &str,
-    asn: &str,
-    outcome: &ProbeOutcome,
-    port: u16,
-) -> (Option<u128>, String) {
+const fn outcome_rtt(outcome: &ProbeOutcome) -> Option<u128> {
     match outcome {
-        ProbeOutcome::Open { rtt, bytes } => {
-            let latency_micros = rtt.as_micros();
-            let entry = format!(
-                "  {} ({}): {} protocol={} port={} bytes={}",
-                host.green(),
-                asn.green(),
-                color_time(micros_to_ms(latency_micros)),
-                "UDP".green(),
-                port.to_string().green(),
-                bytes
-            );
-            (Some(latency_micros), entry)
-        }
-        ProbeOutcome::Closed => {
-            let entry = format!(
-                "  {} closed (Port Unreachable) ({}): protocol={} port={}",
-                host.red(),
-                asn.red(),
-                "UDP".red(),
-                port.to_string().red()
-            );
-            (None, entry)
-        }
-        ProbeOutcome::NoResponse => {
-            let entry = format!(
-                "  {} no response (open|filtered) ({}): protocol={} port={}",
-                host.orange(),
-                asn.orange(),
-                "UDP".orange(),
-                port.to_string().orange()
-            );
-            (None, entry)
-        }
+        ProbeOutcome::Open { rtt, .. } => Some(rtt.as_micros()),
+        ProbeOutcome::Closed | ProbeOutcome::NoResponse => None,
     }
 }
 
@@ -252,74 +208,34 @@ pub fn perform_udp_multi_scan(
     minimal: bool,
     no_asn: bool,
 ) {
-    let attempts = attempts_per_host.max(1);
-    let chunk_size = hosts.len().min(32);
-    let mut times = VecDeque::new();
-    let mut successes = 0usize;
-    let mut responsive_hosts: HashSet<String> = HashSet::new();
-    let payload = probe_payload(port);
-    let timeout_dur = Duration::from_millis(timeout_ms);
-
-    for attempt_idx in 0..attempts {
-        if !minimal && attempts > 1 {
-            let message = format!("Attempt {}/{}", attempt_idx + 1, attempts);
-            print_with_prefix(minimal, &message);
-        }
-        for chunk in hosts.chunks(chunk_size) {
-            let mut results = Vec::with_capacity(chunk.len());
-            for host in chunk {
-                let host = host.clone();
-                let Ok(ip) = resolve_ip(&host, port) else {
-                    let entry = format!(
-                        "  {} no response (open|filtered) ({}): protocol={} port={}",
-                        host.orange(),
-                        "resolve error".orange(),
-                        "UDP".orange(),
-                        port.to_string().orange()
-                    );
-                    print_with_prefix(minimal, &entry);
-                    results.push((host.clone(), None));
-                    sleep(Duration::from_secs(1));
-                    continue;
-                };
-                let asn = fetch_asn(&ip.ip().to_string(), no_asn, timeout_ms)
-                    .unwrap_or_else(|_| "?".to_string());
-                let outcome = udp_probe_once(ip, &payload, timeout_dur);
-                let (latency_micros, entry) = udp_multi_entry(&host, &asn, &outcome, port);
-                print_with_prefix(minimal, &entry);
-                results.push((host.clone(), latency_micros));
-                sleep(Duration::from_secs(1));
-            }
-            for (host, latency_micros) in &results {
-                if let Some(latency) = latency_micros {
-                    successes += 1;
-                    responsive_hosts.insert(host.clone());
-                    times.push_back(*latency);
-                } else {
-                    times.push_back(0);
-                }
-            }
-        }
-    }
-    let total_attempts = hosts.len() * attempts;
-    if minimal {
-        let mut responsive_list: Vec<String> = responsive_hosts.iter().cloned().collect();
-        responsive_list.sort();
-        if !responsive_list.is_empty() {
-            let entries = responsive_list
-                .iter()
-                .map(|ip| ip.green())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let message = format!("[{entries}]");
-            print_with_prefix(minimal, &message);
-        }
-    }
-    let summary = format!(
-        "Hosts responsive: {}/{}",
-        responsive_hosts.len().to_string().green(),
-        hosts.len()
+    crate::multiport::perform_host_scan(
+        hosts,
+        port,
+        true,
+        timeout_ms,
+        attempts_per_host,
+        minimal,
+        no_asn,
     );
-    print_with_prefix(minimal, &summary);
-    print_statistics("UDP multi", total_attempts, successes, &times);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn multi_scan_probes_hosts_in_parallel() {
+        let hosts: Vec<String> = ["127.0.0.1", "127.0.0.2", "127.0.0.3", "127.0.0.4"]
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        let start = Instant::now();
+        perform_udp_multi_scan(&hosts, 9, 200, 2, true, true);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed.as_secs() < 4,
+            "multi scan should probe hosts in parallel, took {elapsed:?}"
+        );
+    }
 }

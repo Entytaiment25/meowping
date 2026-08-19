@@ -1,7 +1,6 @@
 use crate::colors::Colorize;
 use crate::https;
-use crate::output::{color_time, micros_to_ms, print_statistics};
-use std::collections::VecDeque;
+use crate::output::{PingStats, color_time, print_statistics};
 use std::error::Error;
 use std::fmt;
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
@@ -103,29 +102,22 @@ pub fn perform_connection(
     count: usize,
     asn: &str,
     minimal: bool,
-) -> (usize, VecDeque<u128>) {
-    let mut successes = 0;
-    let mut times = VecDeque::new();
+) -> PingStats {
+    let mut stats = PingStats::default();
 
-    for _ in 0..count {
+    for attempt_idx in 0..count {
         let duration = measure_connection_time(ip_lookup, port, timeout);
-        if let Some(rtt) = duration {
-            times.push_back(rtt.as_micros());
-        } else {
-            times.push_back(0);
-        }
+        stats.record(duration.is_some(), duration.map(|d| d.as_micros()));
 
         let status_message = format_connection_status(ip_lookup, asn, port, duration, minimal);
         println!("{status_message}");
 
-        if duration.is_some() {
-            successes += 1;
+        if attempt_idx + 1 != count {
+            sleep(Duration::from_secs(1));
         }
-
-        sleep(Duration::from_secs(1));
     }
 
-    (successes, times)
+    stats
 }
 
 fn measure_connection_time(ip_lookup: SocketAddr, port: u16, timeout: u64) -> Option<Duration> {
@@ -218,8 +210,8 @@ pub fn perform_tcp(
     }
 
     let asn = fetch_asn(&ip_lookup.ip().to_string(), no_asn, timeout)?;
-    let (successes, times) = perform_connection(ip_lookup, port, timeout, count, &asn, minimal);
-    print_statistics("TCP", count, successes, &times);
+    let stats = perform_connection(ip_lookup, port, timeout, count, &asn, minimal);
+    print_statistics("TCP", &stats);
 
     Ok(())
 }
@@ -232,102 +224,34 @@ pub fn perform_tcp_multi_scan(
     minimal: bool,
     no_asn: bool,
 ) {
-    use crate::output::print_with_prefix;
-    use std::collections::HashSet;
-
-    let attempts = attempts_per_host.max(1);
-    let chunk_size = hosts.len().min(32);
-    let mut times = VecDeque::new();
-    let mut successes = 0usize;
-    let mut responsive_hosts: HashSet<String> = HashSet::new();
-
-    for attempt_idx in 0..attempts {
-        if !minimal && attempts > 1 {
-            let message = format!("Attempt {}/{}", attempt_idx + 1, attempts);
-            print_with_prefix(minimal, &message);
-        }
-        for chunk in hosts.chunks(chunk_size) {
-            let mut results = Vec::with_capacity(chunk.len());
-            for host in chunk {
-                let host = host.clone();
-                let Ok(ip) = resolve_ip(&host, port) else {
-                    let entry = format!(
-                        "  {} timed out ({}): protocol={} port={}",
-                        host.red(),
-                        "resolve error".red(),
-                        "TCP".red(),
-                        port.to_string().red()
-                    );
-                    print_with_prefix(minimal, &entry);
-                    results.push((host.clone(), None, "resolve error".to_string()));
-                    sleep(Duration::from_secs(1));
-                    continue;
-                };
-                let asn = fetch_asn(&ip.ip().to_string(), no_asn, timeout_ms)
-                    .unwrap_or_else(|_| "?".to_string());
-                let latency = tcp_connect_once(ip.ip(), port, timeout_ms);
-                let (latency_micros, entry) = latency.map_or_else(
-                    || {
-                        (
-                            None,
-                            format!(
-                                "  {} timed out ({}): protocol={} port={}",
-                                host.red(),
-                                asn.red(),
-                                "TCP".red(),
-                                port.to_string().red()
-                            ),
-                        )
-                    },
-                    |rtt| {
-                        let latency_micros = rtt.as_micros();
-                        (
-                            Some(latency_micros),
-                            format!(
-                                "  {} ({}): {} protocol={} port={}",
-                                host.green(),
-                                asn.green(),
-                                color_time(micros_to_ms(latency_micros)),
-                                "TCP".green(),
-                                port.to_string().green()
-                            ),
-                        )
-                    },
-                );
-                print_with_prefix(minimal, &entry);
-                results.push((host.clone(), latency_micros, asn));
-                sleep(Duration::from_secs(1));
-            }
-            for (host, latency_micros, _) in &results {
-                if let Some(latency) = latency_micros {
-                    successes += 1;
-                    responsive_hosts.insert(host.clone());
-                    times.push_back(*latency);
-                } else {
-                    times.push_back(0);
-                }
-            }
-        }
-    }
-    let total_attempts = hosts.len() * attempts;
-    if minimal {
-        let mut responsive_list: Vec<String> = responsive_hosts.iter().cloned().collect();
-        responsive_list.sort();
-        if !responsive_list.is_empty() {
-            let entries = responsive_list
-                .iter()
-                .map(|ip| ip.green())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let message = format!("[{entries}]");
-            print_with_prefix(minimal, &message);
-        }
-    }
-    let summary = format!(
-        "Hosts responsive: {}/{}",
-        responsive_hosts.len().to_string().green(),
-        hosts.len()
+    crate::multiport::perform_host_scan(
+        hosts,
+        port,
+        false,
+        timeout_ms,
+        attempts_per_host,
+        minimal,
+        no_asn,
     );
-    print_with_prefix(minimal, &summary);
-    print_statistics("TCP multi", total_attempts, successes, &times);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn multi_scan_probes_hosts_in_parallel() {
+        let hosts: Vec<String> = ["127.0.0.1", "127.0.0.2", "127.0.0.3", "127.0.0.4"]
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        let start = Instant::now();
+        perform_tcp_multi_scan(&hosts, 1, 200, 2, true, true);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed.as_secs() < 4,
+            "multi scan should probe hosts in parallel, took {elapsed:?}"
+        );
+    }
 }

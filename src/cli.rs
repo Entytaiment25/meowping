@@ -99,7 +99,7 @@ impl Arguments {
 
                 let value = value_str
                     .parse::<T>()
-                    .map_err(|e| format!("Failed to parse value for {e}: {name}"))?;
+                    .map_err(|e| format!("Failed to parse value for {name}: {e}"))?;
                 self.args.remove(i);
                 return Ok(Some(value));
             }
@@ -109,7 +109,11 @@ impl Arguments {
         while i < self.args.len() {
             let is_name = names.iter().any(|&name| self.args[i] == name);
             if is_name {
-                if i + 1 >= self.args.len() {
+                let has_value = self
+                    .args
+                    .get(i + 1)
+                    .is_some_and(|value| !value.starts_with('-'));
+                if !has_value {
                     return Err(format!("Missing value for option {}", self.args[i]));
                 }
                 let value_str = self.args.remove(i + 1);
@@ -123,5 +127,73 @@ impl Arguments {
         }
 
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Arguments {
+        Arguments {
+            args: list.iter().map(ToString::to_string).collect(),
+        }
+    }
+
+    #[test]
+    fn multiple_value_flags_before_destination() {
+        let mut a = args(&["-t", "250", "-c", "3", "-p", "80-82", "example.com"]);
+        let timeout: Option<u64> = a.opt_value_from_str(["-t", "--timeout"]).unwrap();
+        assert_eq!(timeout, Some(250));
+        let count: Option<usize> = a.opt_value_from_str(["-c", "--count"]).unwrap();
+        assert_eq!(count, Some(3));
+        let ports: Option<String> = a.opt_value_from_str(["-p", "--port"]).unwrap();
+        assert_eq!(ports.as_deref(), Some("80-82"));
+        let dest: String = a.free_from_str().unwrap();
+        assert_eq!(dest, "example.com");
+    }
+
+    #[test]
+    fn destination_before_flags_still_works() {
+        let mut a = args(&["example.com", "-t", "500"]);
+        let timeout: Option<u64> = a.opt_value_from_str(["-t", "--timeout"]).unwrap();
+        assert_eq!(timeout, Some(500));
+        let dest: String = a.free_from_str().unwrap();
+        assert_eq!(dest, "example.com");
+    }
+
+    #[test]
+    fn equals_form_value() {
+        let mut a = args(&["--timeout=750", "1.1.1.1"]);
+        let timeout: Option<u64> = a.opt_value_from_str(["-t", "--timeout"]).unwrap();
+        assert_eq!(timeout, Some(750));
+        let dest: String = a.free_from_str().unwrap();
+        assert_eq!(dest, "1.1.1.1");
+    }
+
+    #[test]
+    fn flag_is_not_consumed_as_value() {
+        let mut a = args(&["-p", "-u", "example.com"]);
+        assert!(a.opt_value_from_str::<String, 2>(["-p", "--port"]).is_err());
+        let dest: String = a.free_from_str().unwrap();
+        assert_eq!(dest, "example.com");
+    }
+
+    #[test]
+    fn missing_value_at_end_is_error() {
+        let mut a = args(&["example.com", "-t"]);
+        assert!(a.opt_value_from_str::<u64, 2>(["-t", "--timeout"]).is_err());
+    }
+
+    #[test]
+    fn bad_value_error_names_the_flag() {
+        let mut a = args(&["-t", "abc", "1.1.1.1"]);
+        let err = a
+            .opt_value_from_str::<u64, 2>(["-t", "--timeout"])
+            .unwrap_err();
+        assert_eq!(
+            err,
+            "Failed to parse value for -t: invalid digit found in string"
+        );
     }
 }

@@ -1,3 +1,18 @@
+use std::io::IsTerminal;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static COLOR_ENABLED: AtomicBool = AtomicBool::new(true);
+
+pub fn init_colors() {
+    let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
+    let enabled = !no_color && std::io::stdout().is_terminal();
+    COLOR_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+fn colors_enabled() -> bool {
+    COLOR_ENABLED.load(Ordering::Relaxed)
+}
+
 #[cfg(target_os = "windows")]
 pub mod fix_ansicolor {
     use windows_sys::Win32::System::Console::{
@@ -48,6 +63,9 @@ pub trait Colorize {
 
 impl Colorize for str {
     fn color(&self, color_code: &str) -> String {
+        if !colors_enabled() {
+            return self.to_string();
+        }
         format!("{}{}{}", color_code, self, "\x1b[0m")
     }
 }
@@ -80,6 +98,9 @@ impl HyperLink {
 impl Display for HyperLink {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { text, link } = self;
+        if !colors_enabled() {
+            return write!(f, "{text}");
+        }
         write!(f, "\x1b]8;;{link}\x1b\\{text}\x1b]8;;\x1b\\")
     }
 }

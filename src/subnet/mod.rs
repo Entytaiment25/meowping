@@ -1,10 +1,7 @@
 mod scan;
 mod watch;
 
-pub use scan::{
-    perform_icmp_ipv6_subnet_scan, perform_icmp_subnet_scan, perform_tcp_ipv6_subnet_scan,
-    perform_tcp_subnet_scan, perform_udp_ipv6_subnet_scan, perform_udp_subnet_scan,
-};
+pub use scan::{ProbeKind, Subnet, perform_subnet_scan};
 
 use std::net::{Ipv4Addr, Ipv6Addr};
 
@@ -144,9 +141,6 @@ impl Ipv4Subnet {
 
     pub fn iter_hosts(self) -> SubnetHostIter<u32> {
         let total_addresses = 1u128 << (32 - u32::from(self.prefix));
-        if total_addresses == 0 {
-            return SubnetHostIter::empty();
-        }
 
         let network = u128::from(self.network);
         let (start, end) = if self.prefix >= 31 {
@@ -243,9 +237,6 @@ impl Ipv6Subnet {
         }
 
         let total_addresses = 1u128 << host_bits;
-        if total_addresses == 0 {
-            return SubnetHostIter::empty();
-        }
 
         let network = self.network;
         let (start, end) = if self.prefix >= 127 {
@@ -266,5 +257,139 @@ impl Ipv6Subnet {
             end,
             finished: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn v4_from_str_masks_host_bits() {
+        let s = Ipv4Subnet::from_str("192.168.1.130/24").unwrap();
+        assert_eq!(s.notation(), "192.168.1.0/24");
+    }
+
+    #[test]
+    fn v4_host_counts() {
+        assert_eq!(
+            Ipv4Subnet::from_str("10.0.0.0/24").unwrap().host_count(),
+            254
+        );
+        assert_eq!(Ipv4Subnet::from_str("10.0.0.0/30").unwrap().host_count(), 2);
+        assert_eq!(Ipv4Subnet::from_str("10.0.0.0/31").unwrap().host_count(), 2);
+        assert_eq!(Ipv4Subnet::from_str("10.0.0.0/32").unwrap().host_count(), 1);
+        assert_eq!(
+            Ipv4Subnet::from_str("0.0.0.0/0").unwrap().host_count(),
+            (1u128 << 32) - 2
+        );
+    }
+
+    #[test]
+    fn v4_iter_hosts_skips_network_and_broadcast() {
+        let hosts: Vec<_> = Ipv4Subnet::from_str("192.168.1.0/30")
+            .unwrap()
+            .iter_hosts()
+            .collect();
+        assert_eq!(
+            hosts,
+            vec![Ipv4Addr::new(192, 168, 1, 1), Ipv4Addr::new(192, 168, 1, 2)]
+        );
+    }
+
+    #[test]
+    fn v4_iter_hosts_point_to_point_keeps_both() {
+        let hosts: Vec<_> = Ipv4Subnet::from_str("10.0.0.4/31")
+            .unwrap()
+            .iter_hosts()
+            .collect();
+        assert_eq!(
+            hosts,
+            vec![Ipv4Addr::new(10, 0, 0, 4), Ipv4Addr::new(10, 0, 0, 5)]
+        );
+    }
+
+    #[test]
+    fn v4_iter_hosts_single_host() {
+        let hosts: Vec<_> = Ipv4Subnet::from_str("10.0.0.7/32")
+            .unwrap()
+            .iter_hosts()
+            .collect();
+        assert_eq!(hosts, vec![Ipv4Addr::new(10, 0, 0, 7)]);
+    }
+
+    #[test]
+    fn v4_from_str_errors() {
+        assert!(Ipv4Subnet::from_str("192.168.1.0/33").is_err());
+        assert!(Ipv4Subnet::from_str("192.168.1.0").is_err());
+        assert!(Ipv4Subnet::from_str("192.168.1.0/24/24").is_err());
+        assert!(Ipv4Subnet::from_str("notanip/24").is_err());
+        assert!(Ipv4Subnet::from_str("192.168.1.0/abc").is_err());
+    }
+
+    #[test]
+    fn v6_from_str_masks_host_bits() {
+        let s = Ipv6Subnet::from_str("2001:db8::abcd/120").unwrap();
+        assert_eq!(s.notation(), "2001:db8::ab00/120");
+    }
+
+    #[test]
+    fn v6_host_counts() {
+        assert_eq!(
+            Ipv6Subnet::from_str("2001:db8::/120").unwrap().host_count(),
+            254
+        );
+        assert_eq!(
+            Ipv6Subnet::from_str("2001:db8::/112").unwrap().host_count(),
+            65_534
+        );
+        assert_eq!(
+            Ipv6Subnet::from_str("2001:db8::/127").unwrap().host_count(),
+            2
+        );
+        assert_eq!(
+            Ipv6Subnet::from_str("2001:db8::/128").unwrap().host_count(),
+            1
+        );
+    }
+
+    #[test]
+    fn v6_iter_hosts_skips_first_and_last() {
+        let hosts: Vec<_> = Ipv6Subnet::from_str("2001:db8::/126")
+            .unwrap()
+            .iter_hosts()
+            .collect();
+        let expected: Vec<Ipv6Addr> = [
+            Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1),
+            Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 2),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(hosts, expected);
+    }
+
+    #[test]
+    fn v6_iter_hosts_caps_at_112() {
+        assert_eq!(
+            Ipv6Subnet::from_str("2001:db8::/112")
+                .unwrap()
+                .iter_hosts()
+                .count(),
+            65_534
+        );
+        assert_eq!(
+            Ipv6Subnet::from_str("2001:db8::/111")
+                .unwrap()
+                .iter_hosts()
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn v6_from_str_errors() {
+        assert!(Ipv6Subnet::from_str("2001:db8::/129").is_err());
+        assert!(Ipv6Subnet::from_str("2001:db8::").is_err());
+        assert!(Ipv6Subnet::from_str("notanip/64").is_err());
     }
 }

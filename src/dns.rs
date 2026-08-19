@@ -1,7 +1,6 @@
 use crate::colors::Colorize;
-use crate::output::{color_time, format_with_prefix, print_statistics};
+use crate::output::{PingStats, color_time, format_with_prefix, print_statistics};
 use crate::parser::{Extracted, Parser};
-use std::collections::VecDeque;
 use std::error::Error;
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
@@ -160,10 +159,6 @@ fn format_dns_status(
     format_with_prefix(minimal, &body)
 }
 
-fn next_query_id(seed: u16, attempt: usize) -> u16 {
-    seed.wrapping_add(u16::try_from(attempt & 0xFFFF).unwrap_or(0))
-}
-
 pub fn perform_dns(
     destination: &str,
     timeout: u64,
@@ -188,11 +183,10 @@ pub fn perform_dns(
         });
     let timeout_dur = Duration::from_millis(timeout);
 
-    let mut times: VecDeque<u128> = VecDeque::new();
-    let mut successes = 0usize;
+    let mut stats = PingStats::default();
+    let mut id = seed;
 
     for attempt_idx in 0..count {
-        let id = next_query_id(seed, attempt_idx);
         let Some(query) = build_query(id, &domain) else {
             return Err(format!("Invalid domain for DNS query: {domain}").into());
         };
@@ -202,21 +196,22 @@ pub fn perform_dns(
         let entry = format_dns_status(&domain, &outcome, minimal, dns_server);
         println!("{entry}");
 
-        match outcome {
-            DnsOutcome::Resolved { rtt, .. } | DnsOutcome::Negative { rtt, .. } => {
-                times.push_back(rtt.as_micros());
-            }
-            DnsOutcome::NoResponse => times.push_back(0),
-        }
-        if is_success {
-            successes += 1;
-        }
+        stats.record(
+            is_success,
+            match outcome {
+                DnsOutcome::Resolved { rtt, .. } | DnsOutcome::Negative { rtt, .. } => {
+                    Some(rtt.as_micros())
+                }
+                DnsOutcome::NoResponse => None,
+            },
+        );
 
         if attempt_idx + 1 != count {
             sleep(Duration::from_secs(1));
         }
+        id = id.wrapping_add(1);
     }
 
-    print_statistics("DNS", count, successes, &times);
+    print_statistics("DNS", &stats);
     Ok(())
 }

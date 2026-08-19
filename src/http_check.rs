@@ -1,3 +1,4 @@
+use crate::colors::Colorize;
 use crate::https;
 use std::error::Error;
 use std::thread::sleep;
@@ -44,7 +45,7 @@ fn check_http_status(
             let formatted = if minimal {
                 message
             } else {
-                format!("{} {}", "[MEOWPING]".magenta_str(), message)
+                format!("{} {}", "[MEOWPING]".magenta(), message)
             };
 
             if is_online {
@@ -59,7 +60,12 @@ fn check_http_status(
                 s if s.contains("address information") || s.contains("nodename nor servname") => {
                     "Failed to resolve host"
                 }
-                s if s.contains("timed out") || s.contains("timeout") => "Connection timed out",
+                s if s.contains("timed out")
+                    || s.contains("timeout")
+                    || s.contains("temporarily unavailable") =>
+                {
+                    "Connection timed out"
+                }
                 s if s.contains("refused") => "Connection refused",
                 _ => &error_str,
             };
@@ -67,19 +73,9 @@ fn check_http_status(
             let error_msg = if minimal {
                 simplified_error.to_string()
             } else {
-                format!("{} {}", "[MEOWPING]".magenta_str(), simplified_error)
+                format!("{} {}", "[MEOWPING]".magenta(), simplified_error)
             };
             Err(error_msg.into())
         }
-    }
-}
-
-trait MagentaStr {
-    fn magenta_str(&self) -> String;
-}
-
-impl MagentaStr for str {
-    fn magenta_str(&self) -> String {
-        format!("\x1b[35m{self}\x1b[0m")
     }
 }
