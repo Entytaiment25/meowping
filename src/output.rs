@@ -117,7 +117,7 @@ pub fn print_help() {
     println!("    -h, --help                Prints the Help Menu");
     println!("    -V, --version             Prints the version");
     println!(
-        "    -p, --port <port(s)>     Port to probe (default: ICMP). Accepts a single port, a comma list (53,80,443), or a range (20-25)"
+        "    -p, --port <port(s)>      Port to probe (default: ICMP). Accepts a single port, a comma list (53,80,443), or a range (20-25)"
     );
     println!(
         "    -t, --timeout <timeout>   Set the timeout for each connection attempt in milliseconds (default: 1000ms, minimum: 1ms)"
@@ -126,14 +126,14 @@ pub fn print_help() {
         "    -c, --count <count>       Set the number of connection attempts (default: 65535)"
     );
     println!("    -m, --minimal             Changes the Prints to be more Minimal");
-    println!("    -s, --http              Check if the destination URL is online via HTTP/S");
-    println!("    -u, --udp              Probe a UDP port instead of using TCP (requires -p)");
+    println!("    -s, --http                Check if the destination URL is online via HTTP/S");
+    println!("    -u, --udp                 Probe a UDP port instead of using TCP (requires -p)");
     println!(
-        "    -d, --dns               DNS ping: time A record lookups for the destination (resolver: dns_server in config, default 1.1.1.1)"
+        "    -d, --dns                 DNS ping: time A record lookups for the destination (resolver: dns_server in config, default 1.1.1.1)"
     );
-    println!("    -a, --no-asn            Disable ASN/organization lookups (use static data)");
+    println!("    -a, --no-asn              Disable ASN/organization lookups (use static data)");
     println!(
-        "    -C, --config [path]     Load settings from a config file (default: meowping.conf next to the executable)"
+        "    -C, --config [path]       Load settings from a config file (default: meowping.conf next to the executable)"
     );
 
     println!("\n{}", "Examples:".bright_blue());

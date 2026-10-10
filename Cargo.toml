@@ -8,7 +8,6 @@ edition = "2024"
 rust-version = "1.97.1"
 description = " A flexible ping utility Tool written in Rust, that is focused on being size efficient and fast."
 repository = "https://github.com/entytaiment25/meowping"
-homepage = "https://github.com/entytaiment25/meowping"
 license = "MIT"
 keywords = ["icmp", "tcp", "udp", "http", "ping"]
 categories = ["network-programming", "command-line-utilities"]

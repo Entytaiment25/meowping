@@ -1,3 +1,4 @@
+use crate::asn_cache;
 use crate::colors::Colorize;
 use crate::https;
 use crate::output::{PingStats, color_time, print_statistics};
@@ -58,25 +59,31 @@ pub fn fetch_asn(ip: &str, no_api: bool, timeout: u64) -> Result<String, Box<dyn
         return Ok("no lookup".to_string());
     }
 
+    if let Some(org) = asn_cache::get(ip_addr) {
+        return Ok(org);
+    }
+
     let url = format!("https://ipinfo.io/{ip}/json");
     let response_text =
         https::get(&url, timeout).map_err(|e| Box::new(MeowpingError(e.to_string())))?;
-    Ok(extract_asn_from_response(&response_text))
+    // No "org" (for example a rate limit reply) is not cached, so the next run retries.
+    let Some(org) = extract_asn_from_response(&response_text) else {
+        return Ok("Unknown ASN".to_string());
+    };
+    asn_cache::put(ip_addr, &org);
+    Ok(org)
 }
 
-fn extract_asn_from_response(response_text: &str) -> String {
-    if let Some(start) = response_text.find("\"org\"") {
-        let start = response_text[start..]
-            .find(':')
-            .map_or(0, |i| start + i + 1);
-        let start = response_text[start..]
-            .find('"')
-            .map_or(0, |i| start + i + 1);
-        if let Some(end) = response_text[start..].find('"') {
-            return response_text[start..start + end].trim().to_string();
-        }
-    }
-    "Unknown ASN".to_string()
+fn extract_asn_from_response(response_text: &str) -> Option<String> {
+    let start = response_text.find("\"org\"")?;
+    let start = response_text[start..]
+        .find(':')
+        .map_or(0, |i| start + i + 1);
+    let start = response_text[start..]
+        .find('"')
+        .map_or(0, |i| start + i + 1);
+    let end = response_text[start..].find('"')?;
+    Some(response_text[start..start + end].trim().to_string())
 }
 
 pub fn print_ip_info(destination: &str, ip: &str, minimal: bool) {
@@ -239,6 +246,19 @@ pub fn perform_tcp_multi_scan(
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    #[test]
+    fn extracts_org_and_rejects_replies_without_it() {
+        assert_eq!(
+            extract_asn_from_response(r#"{"ip": "1.1.1.1", "org": "AS13335 Cloudflare, Inc."}"#)
+                .as_deref(),
+            Some("AS13335 Cloudflare, Inc.")
+        );
+        assert_eq!(
+            extract_asn_from_response(r#"{"error": {"title": "Rate limit exceeded"}}"#),
+            None
+        );
+    }
 
     #[test]
     fn multi_scan_probes_hosts_in_parallel() {

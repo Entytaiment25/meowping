@@ -17,7 +17,7 @@ MeowPing is a command-line utility for testing network connectivity using ICMP e
 
 ## Third-Party Services
 
-**Disclaimer:** For TCP and UDP connections, MeowPing retrieves ASN/organization data from https://ipinfo.io. Use `-a`/`--no-asn` to disable these API calls and use static data instead.
+**Disclaimer:** For TCP and UDP connections, MeowPing retrieves ASN/organization data from https://ipinfo.io. Use `-a`/`--no-asn` to disable these API calls and use static data instead. Lookups are cached for 7 days in `meowping/asn.cache` under your user cache folder (`~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or `~/.cache` on Linux, `%LOCALAPPDATA%` on Windows); `-a` skips both the lookup and the cache. Delete the file to clear it.
 
 ## Usage
 
@@ -30,15 +30,17 @@ ARGS:
     <destination>           Specify the destination(s) to ping (can be an IP address, domain name, or a comma-separated list or [list,of,hosts])
 
 OPTIONS:
-    -h, --help              Prints the Help Menu
-    -p, --port <port(s)>    Port to probe (default: ICMP). Accepts a single port, a comma list (53,80,443), or a range (20-25)
-    -s, --http              Check if the destination URL is online via HTTP/S
-    -u, --udp               Probe a UDP port instead of using TCP (requires -p)
-    -t, --timeout <ms>      Set the timeout for each connection attempt in milliseconds (default: 1000ms)
-    -c, --count <count>     Set the number of connection attempts (default: 65535)
-    -m, --minimal           Changes the Prints to be more Minimal
-    -a, --no-asn            Disable ASN/organization lookups (use static data)
-    -C, --config [path]     Load settings from a config file (default: meowping.conf next to the executable)
+    -h, --help                Prints the Help Menu
+    -V, --version             Prints the version
+    -p, --port <port(s)>      Port to probe (default: ICMP). Accepts a single port, a comma list (53,80,443), or a range (20-25)
+    -t, --timeout <timeout>   Set the timeout for each connection attempt in milliseconds (default: 1000ms, minimum: 1ms)
+    -c, --count <count>       Set the number of connection attempts (default: 65535)
+    -m, --minimal             Changes the Prints to be more Minimal
+    -s, --http                Check if the destination URL is online via HTTP/S
+    -u, --udp                 Probe a UDP port instead of using TCP (requires -p)
+    -d, --dns                 DNS ping: time A record lookups for the destination (resolver: dns_server in config, default 1.1.1.1)
+    -a, --no-asn              Disable ASN/organization lookups (use static data)
+    -C, --config [path]       Load settings from a config file (default: meowping.conf next to the executable)
 ```
 
 

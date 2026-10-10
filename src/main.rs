@@ -3,6 +3,7 @@
 
 use std::{error::Error, net::IpAddr};
 
+mod asn_cache;
 mod cli;
 mod colors;
 mod config;
