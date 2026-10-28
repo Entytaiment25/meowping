@@ -5,6 +5,7 @@ use crate::output::{PingStats, TIME_COLUMN_WIDTH, color_time_padded, print_stati
 use std::error::Error;
 use std::fmt;
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
+use std::sync::mpsc::{self, Receiver};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -74,6 +75,44 @@ pub fn fetch_asn(ip: &str, no_api: bool, timeout: u64) -> Result<String, Box<dyn
     Ok(org)
 }
 
+/// Runs the ASN lookup on a background thread so pinging can start right away.
+/// Until the result arrives the label is empty and lines are printed without it.
+pub struct AsnLookup {
+    rx: Option<Receiver<String>>,
+    label: String,
+}
+
+impl AsnLookup {
+    pub fn spawn(ip: String, no_api: bool, timeout: u64) -> Self {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let org = fetch_asn(&ip, no_api, timeout).unwrap_or_else(|_| "Unknown ASN".to_string());
+            let _ = tx.send(org);
+        });
+        Self {
+            rx: Some(rx),
+            label: String::new(),
+        }
+    }
+
+    /// The label so far. Cached, private and `-a` lookups finish within the grace
+    /// period, so only a real network lookup can leave the first lines without it.
+    pub fn label(&mut self) -> &str {
+        if let Some(rx) = &self.rx {
+            let grace = if self.label.is_empty() {
+                Duration::from_millis(25)
+            } else {
+                Duration::ZERO
+            };
+            if let Ok(org) = rx.recv_timeout(grace) {
+                self.label = org;
+                self.rx = None;
+            }
+        }
+        &self.label
+    }
+}
+
 fn extract_asn_from_response(response_text: &str) -> Option<String> {
     let start = response_text.find("\"org\"")?;
     let start = response_text[start..]
@@ -107,7 +146,7 @@ pub fn perform_connection(
     port: u16,
     timeout: u64,
     count: usize,
-    asn: &str,
+    asn: &mut AsnLookup,
     minimal: bool,
 ) -> PingStats {
     let mut stats = PingStats::default();
@@ -116,7 +155,8 @@ pub fn perform_connection(
         let duration = measure_connection_time(ip_lookup, port, timeout);
         stats.record(duration.is_some(), duration.map(|d| d.as_micros()));
 
-        let status_message = format_connection_status(ip_lookup, asn, port, duration, minimal);
+        let status_message =
+            format_connection_status(ip_lookup, asn.label(), port, duration, minimal);
         println!("{status_message}");
 
         if attempt_idx + 1 != count {
@@ -150,7 +190,7 @@ fn format_connection_status(
     duration: Option<Duration>,
     minimal: bool,
 ) -> String {
-    let show_asn = !minimal || asn != "no lookup";
+    let show_asn = !asn.is_empty() && (!minimal || asn != "no lookup");
     let prefix = if minimal {
         String::new()
     } else {
@@ -218,9 +258,8 @@ pub fn perform_tcp(
         print_ip_info(destination, &ip_lookup.ip().to_string(), minimal);
     }
 
-    let asn = fetch_asn(&ip_lookup.ip().to_string(), no_asn, timeout)
-        .unwrap_or_else(|_| "Unknown ASN".to_string());
-    let stats = perform_connection(ip_lookup, port, timeout, count, &asn, minimal);
+    let mut asn = AsnLookup::spawn(ip_lookup.ip().to_string(), no_asn, timeout);
+    let stats = perform_connection(ip_lookup, port, timeout, count, &mut asn, minimal);
     print_statistics("TCP", &stats);
 
     Ok(())

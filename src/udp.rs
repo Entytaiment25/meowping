@@ -1,6 +1,6 @@
 use crate::colors::Colorize;
 use crate::output::{PingStats, TIME_COLUMN_WIDTH, color_time_padded, print_statistics};
-use crate::tcp::{fetch_asn, resolve_ip};
+use crate::tcp::{AsnLookup, resolve_ip};
 use std::borrow::Cow;
 use std::io::ErrorKind;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
@@ -82,7 +82,7 @@ fn format_udp_status(
     outcome: &ProbeOutcome,
     minimal: bool,
 ) -> String {
-    let show_asn = !minimal || asn != "no lookup";
+    let show_asn = !asn.is_empty() && (!minimal || asn != "no lookup");
     let prefix = if minimal {
         String::new()
     } else {
@@ -170,8 +170,7 @@ pub fn perform_udp(
         crate::tcp::print_ip_info(destination, &ip_lookup.ip().to_string(), minimal);
     }
 
-    let asn = fetch_asn(&ip_lookup.ip().to_string(), no_asn, timeout)
-        .unwrap_or_else(|_| "Unknown ASN".to_string());
+    let mut asn = AsnLookup::spawn(ip_lookup.ip().to_string(), no_asn, timeout);
     let payload = probe_payload(port);
     let timeout_dur = Duration::from_millis(timeout);
 
@@ -180,7 +179,7 @@ pub fn perform_udp(
     for attempt_idx in 0..count {
         let outcome = udp_probe_once(ip_lookup, &payload, timeout_dur);
         let is_open = matches!(outcome, ProbeOutcome::Open { .. });
-        let entry = format_udp_status(ip_lookup.ip(), &asn, port, &outcome, minimal);
+        let entry = format_udp_status(ip_lookup.ip(), asn.label(), port, &outcome, minimal);
         println!("{entry}");
 
         stats.record(is_open, outcome_rtt(&outcome));
