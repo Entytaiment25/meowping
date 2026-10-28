@@ -1,5 +1,8 @@
 use crate::colors::Colorize;
-use crate::output::{PingStats, color_time, micros_to_ms, print_statistics, print_with_prefix};
+use crate::output::{
+    PingStats, TIME_COLUMN_WIDTH, color_time_padded, micros_to_ms, print_statistics,
+    print_with_prefix,
+};
 use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, Instant};
@@ -540,7 +543,7 @@ pub fn perform_icmp(
             Ok((bytes, rtt)) => {
                 stats.record(true, Some(rtt.as_micros()));
                 let time_ms = rtt.as_secs_f64() * 1000.0;
-                let time_str = color_time(time_ms);
+                let time_str = color_time_padded(time_ms, TIME_COLUMN_WIDTH);
                 let msg = format!(
                     "Reply from {}: bytes={} icmp_seq={} time={} TTL={} Identifier={}",
                     ip.to_string().green(),
@@ -560,9 +563,9 @@ pub fn perform_icmp(
                     )
                 } else {
                     format!(
-                        "Request timeout for icmp_seq {} time={:.2}ms TTL={} Identifier={}",
+                        "Request timeout for icmp_seq {} time={:>TIME_COLUMN_WIDTH$} TTL={} Identifier={}",
                         display_seq,
-                        micros_to_ms(elapsed_us),
+                        format!("{:.2}ms", micros_to_ms(elapsed_us)),
                         ttl,
                         ident
                     )
