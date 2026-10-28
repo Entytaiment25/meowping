@@ -1,5 +1,5 @@
 use crate::colors::Colorize;
-use crate::output::{PingStats, color_time, print_statistics};
+use crate::output::{PingStats, TIME_COLUMN_WIDTH, color_time_padded, print_statistics};
 use crate::tcp::{fetch_asn, resolve_ip};
 use std::borrow::Cow;
 use std::io::ErrorKind;
@@ -92,7 +92,7 @@ fn format_udp_status(
 
     match outcome {
         ProbeOutcome::Open { rtt, bytes } => {
-            let time_colored = color_time(rtt.as_secs_f64() * 1000.0);
+            let time_colored = color_time_padded(rtt.as_secs_f64() * 1000.0, TIME_COLUMN_WIDTH);
             let body = if show_asn {
                 format!(
                     "{} ({}): {} protocol={} port={} bytes={}",
@@ -170,7 +170,8 @@ pub fn perform_udp(
         crate::tcp::print_ip_info(destination, &ip_lookup.ip().to_string(), minimal);
     }
 
-    let asn = fetch_asn(&ip_lookup.ip().to_string(), no_asn, timeout)?;
+    let asn = fetch_asn(&ip_lookup.ip().to_string(), no_asn, timeout)
+        .unwrap_or_else(|_| "Unknown ASN".to_string());
     let payload = probe_payload(port);
     let timeout_dur = Duration::from_millis(timeout);
 

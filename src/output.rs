@@ -93,8 +93,14 @@ pub fn print_statistics(protocol: &str, stats: &PingStats) {
     );
 }
 
+pub const TIME_COLUMN_WIDTH: usize = 9;
+
 pub fn color_time(time_ms: f64) -> String {
-    let msg = format!("{time_ms:.2}ms");
+    color_time_padded(time_ms, 0)
+}
+
+pub fn color_time_padded(time_ms: f64, width: usize) -> String {
+    let msg = format!("{:>width$}", format!("{time_ms:.2}ms"));
     match time_ms {
         t if t >= 250.0 => msg.orange(),
         t if t >= 100.0 => msg.yellow(),

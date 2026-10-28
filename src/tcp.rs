@@ -1,7 +1,7 @@
 use crate::asn_cache;
 use crate::colors::Colorize;
 use crate::https;
-use crate::output::{PingStats, color_time, print_statistics};
+use crate::output::{PingStats, TIME_COLUMN_WIDTH, color_time_padded, print_statistics};
 use std::error::Error;
 use std::fmt;
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
@@ -161,16 +161,18 @@ fn format_connection_status(
         || {
             let status_message = if show_asn {
                 format!(
-                    "{} timed out ({}): protocol={} port={}",
+                    "{} ({}): {} protocol={} port={}",
                     ip_lookup.ip().to_string().red(),
                     asn.red(),
+                    format!("{:>TIME_COLUMN_WIDTH$}", "timed out").red(),
                     "TCP".red(),
                     port.to_string().red()
                 )
             } else {
                 format!(
-                    "{} timed out: protocol={} port={}",
+                    "{}: {} protocol={} port={}",
                     ip_lookup.ip().to_string().red(),
+                    format!("{:>TIME_COLUMN_WIDTH$}", "timed out").red(),
                     "TCP".red(),
                     port.to_string().red()
                 )
@@ -178,7 +180,7 @@ fn format_connection_status(
             format!("{prefix}{status_message}")
         },
         |rtt| {
-            let time_colored = color_time(rtt.as_secs_f64() * 1000.0);
+            let time_colored = color_time_padded(rtt.as_secs_f64() * 1000.0, TIME_COLUMN_WIDTH);
             let status_message = if show_asn {
                 format!(
                     "{} ({}): {} protocol={} port={}",
@@ -216,7 +218,8 @@ pub fn perform_tcp(
         print_ip_info(destination, &ip_lookup.ip().to_string(), minimal);
     }
 
-    let asn = fetch_asn(&ip_lookup.ip().to_string(), no_asn, timeout)?;
+    let asn = fetch_asn(&ip_lookup.ip().to_string(), no_asn, timeout)
+        .unwrap_or_else(|_| "Unknown ASN".to_string());
     let stats = perform_connection(ip_lookup, port, timeout, count, &asn, minimal);
     print_statistics("TCP", &stats);
 
