@@ -4,6 +4,7 @@ mod watch;
 pub use scan::{ProbeKind, Subnet, perform_subnet_scan};
 
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::str::FromStr;
 
 #[derive(Clone, Copy)]
 enum Family {
@@ -62,6 +63,8 @@ pub trait Word: Copy + PartialOrd {
     const ZERO: Self;
     fn advance(self) -> Self;
     fn into_addr(self) -> Self::Addr;
+    /// Clears the host bits, keeping the leading `prefix` bits.
+    fn masked(self, prefix: u8) -> Self;
 }
 
 impl Word for u32 {
@@ -72,6 +75,13 @@ impl Word for u32 {
     }
     fn into_addr(self) -> Ipv4Addr {
         Ipv4Addr::from(self)
+    }
+    fn masked(self, prefix: u8) -> Self {
+        if prefix == 0 {
+            0
+        } else {
+            self & ((!0u32) << (32 - prefix))
+        }
     }
 }
 
@@ -84,6 +94,28 @@ impl Word for u128 {
     fn into_addr(self) -> Ipv6Addr {
         Ipv6Addr::from(self)
     }
+    fn masked(self, prefix: u8) -> Self {
+        if prefix == 0 {
+            0
+        } else {
+            self & ((!0u128) << (128 - prefix))
+        }
+    }
+}
+
+/// Parses `address/prefix` into the network address (host bits cleared) and the prefix.
+fn parse_subnet<A, W>(
+    input: &str,
+    family: Family,
+    invalid_address: &'static str,
+) -> Result<(W, u8), &'static str>
+where
+    A: FromStr,
+    W: Word + From<A>,
+{
+    let (ip_part, prefix) = parse_prefix(input, family)?;
+    let ip = ip_part.parse::<A>().map_err(|_| invalid_address)?;
+    Ok((W::from(ip).masked(prefix), prefix))
 }
 
 fn format_subnet_notation<W: Word>(network: W, prefix: u8) -> String
@@ -115,19 +147,11 @@ pub struct Ipv4Subnet {
 
 impl Ipv4Subnet {
     pub fn from_str(input: &str) -> Result<Self, &'static str> {
-        let (ip_part, prefix) = parse_prefix(input, Family::V4)?;
-
-        let ip = ip_part
-            .parse::<Ipv4Addr>()
-            .map_err(|_| "Invalid IPv4 address in subnet definition")?;
-
-        let mask = if prefix == 0 {
-            0
-        } else {
-            (!0u32) << (32 - prefix)
-        };
-        let network = u32::from(ip) & mask;
-
+        let (network, prefix) = parse_subnet::<Ipv4Addr, u32>(
+            input,
+            Family::V4,
+            "Invalid IPv4 address in subnet definition",
+        )?;
         Ok(Self { network, prefix })
     }
 
@@ -152,13 +176,16 @@ impl Ipv4Subnet {
             (network + 1, network + total_addresses - 2)
         };
 
-        if start > end {
+        let (Ok(current), Ok(end)) = (u32::try_from(start), u32::try_from(end)) else {
+            return SubnetHostIter::empty();
+        };
+        if current > end {
             return SubnetHostIter::empty();
         }
 
         SubnetHostIter {
-            current: u32::try_from(start).expect("IPv4 subnet start address must fit in u32"),
-            end: u32::try_from(end).expect("IPv4 subnet end address must fit in u32"),
+            current,
+            end,
             finished: false,
         }
     }
@@ -205,19 +232,11 @@ pub struct Ipv6Subnet {
 
 impl Ipv6Subnet {
     pub fn from_str(input: &str) -> Result<Self, &'static str> {
-        let (ip_part, prefix) = parse_prefix(input, Family::V6)?;
-
-        let ip = ip_part
-            .parse::<Ipv6Addr>()
-            .map_err(|_| "Invalid IPv6 address in subnet definition")?;
-
-        let mask = if prefix == 0 {
-            0
-        } else {
-            (!0u128) << (128 - prefix)
-        };
-        let network = u128::from(ip) & mask;
-
+        let (network, prefix) = parse_subnet::<Ipv6Addr, u128>(
+            input,
+            Family::V6,
+            "Invalid IPv6 address in subnet definition",
+        )?;
         Ok(Self { network, prefix })
     }
 

@@ -201,8 +201,8 @@ pub fn print_help() {
 pub fn print_welcome() {
     let version_format = format!("v.{}", env!("CARGO_PKG_VERSION"));
     let name = env!("CARGO_PKG_NAME");
-    let hyperlink =
-        HyperLink::new(name, "https://github.com/entytaiment25/meowping").expect("valid hyperlink");
+    let hyperlink = HyperLink::new(name, "https://github.com/entytaiment25/meowping")
+        .map_or_else(|_| name.to_string(), |link| link.to_string());
     let message = format!(
         "
     ／l、

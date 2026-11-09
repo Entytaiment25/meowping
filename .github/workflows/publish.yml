@@ -6,11 +6,25 @@ on:
 
 permissions:
  contents: read
- id-token: write
 
 jobs:
- publish:
+ verify:
   runs-on: ubuntu-latest
+  steps:
+   - uses: actions/checkout@v4
+   - uses: dtolnay/rust-toolchain@nightly
+     with:
+      components: rust-src
+   # Compiles the package with no token and no OIDC permission in reach of build scripts.
+   - name: Verify package
+     run: cargo publish --dry-run
+
+ publish:
+  needs: verify
+  runs-on: ubuntu-latest
+  permissions:
+   contents: read
+   id-token: write
   steps:
    - uses: actions/checkout@v4
    - uses: dtolnay/rust-toolchain@nightly
@@ -18,7 +32,8 @@ jobs:
       components: rust-src
    - uses: rust-lang/crates-io-auth-action@v1
      id: auth
+   # Already verified above, so nothing is compiled while the token is set.
    - name: Publish
-     run: cargo publish
+     run: cargo publish --no-verify
      env:
       CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

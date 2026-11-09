@@ -141,20 +141,17 @@ pub fn parse_ports(input: &str) -> Result<Vec<u16>, String> {
             if end < start {
                 return Err(format!("Port range end before start: {token}"));
             }
-            if end > u16::MAX.into() {
-                return Err(format!("Port out of range (0-65535): {token}"));
-            }
-            for p in start..=end {
-                ports.push(u16::try_from(p).expect("range bounded by u16::MAX"));
-            }
+            let out_of_range = || format!("Port out of range (0-65535): {token}");
+            let end = u16::try_from(end).map_err(|_| out_of_range())?;
+            let start = u16::try_from(start).map_err(|_| out_of_range())?;
+            ports.extend(start..=end);
         } else {
             let p: u32 = token
                 .parse()
                 .map_err(|_| format!("Invalid port: {token}"))?;
-            if p > u16::MAX.into() {
-                return Err(format!("Port out of range (0-65535): {token}"));
-            }
-            ports.push(u16::try_from(p).expect("single port bounded by u16::MAX"));
+            ports.push(
+                u16::try_from(p).map_err(|_| format!("Port out of range (0-65535): {token}"))?,
+            );
         }
     }
 

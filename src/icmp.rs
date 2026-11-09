@@ -60,7 +60,9 @@ mod platform {
         while (sum >> 16) != 0 {
             sum = (sum & 0xffff) + (sum >> 16);
         }
-        !u16::try_from(sum).expect("ICMP checksum fold must fit into u16")
+        // The fold above leaves the sum within 16 bits.
+        let [_, _, hi, lo] = sum.to_be_bytes();
+        !u16::from_be_bytes([hi, lo])
     }
 
     fn setsockopt_raw(
@@ -70,6 +72,7 @@ mod platform {
         val: *const libc::c_void,
         len: libc::socklen_t,
     ) -> io::Result<()> {
+        // SAFETY: `val` points to a live value of `len` bytes, owned by the caller for this call.
         let ret = unsafe { libc::setsockopt(fd, level, name, val, len) };
         if ret == -1 {
             return Err(io::Error::last_os_error());
@@ -126,6 +129,7 @@ mod platform {
     }
     impl Drop for FdGuard {
         fn drop(&mut self) {
+            // SAFETY: the guard owns `fd` and closes it exactly once, here.
             unsafe {
                 libc::close(self.fd);
             }
@@ -140,10 +144,12 @@ mod platform {
         ident: u16,
         payload: &[u8; 24],
     ) -> io::Result<(usize, Duration)> {
+        // SAFETY: socket() takes plain integers and returns a new descriptor or -1.
         let fd_raw =
             unsafe { libc::socket(libc::AF_INET6, libc::SOCK_DGRAM, libc::IPPROTO_ICMPV6) };
         let is_dgram = fd_raw >= 0;
         let fd_raw = if fd_raw < 0 {
+            // SAFETY: as above, plain integers in, descriptor or -1 out.
             unsafe { libc::socket(libc::AF_INET6, libc::SOCK_RAW, libc::IPPROTO_ICMPV6) }
         } else {
             fd_raw
@@ -169,6 +175,7 @@ mod platform {
         packet[7] = (seq & 0xff) as u8;
         packet[8..].copy_from_slice(payload);
 
+        // SAFETY: sockaddr_in6 is plain C data for which all-zero bytes are valid.
         let mut addr: libc::sockaddr_in6 = unsafe { mem::zeroed() };
         addr.sin6_family = sa_family(libc::AF_INET6)?;
         addr.sin6_port = 0;
@@ -180,6 +187,7 @@ mod platform {
         let addr_len = socklen_of::<libc::sockaddr_in6>()?;
 
         let send_time = Instant::now();
+        // SAFETY: `packet` and `addr` outlive the call, and the lengths passed are their sizes.
         retry_on_eintr(|| unsafe {
             libc::sendto(
                 fd.fd,
@@ -192,9 +200,12 @@ mod platform {
         })?;
 
         let mut buf = [0u8; 1500];
+        // SAFETY: sockaddr_in6 is plain C data for which all-zero bytes are valid.
         let mut from: libc::sockaddr_in6 = unsafe { mem::zeroed() };
         let mut from_len = socklen_of::<libc::sockaddr_in6>()?;
 
+        // SAFETY: `buf`, `from` and `from_len` outlive the call, and `from_len` holds the size
+        // of `from`.
         let received = retry_on_eintr(|| unsafe {
             libc::recvfrom(
                 fd.fd,
@@ -235,11 +246,13 @@ mod platform {
         ident: u16,
         payload: &[u8; 24],
     ) -> io::Result<(usize, Duration)> {
+        // SAFETY: socket() takes plain integers and returns a new descriptor or -1.
         let fd_dgram = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, libc::IPPROTO_ICMP) };
         let (fd_raw, is_dgram) = if fd_dgram >= 0 {
             (fd_dgram, true)
         } else {
             (
+                // SAFETY: as above, plain integers in, descriptor or -1 out.
                 unsafe { libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_ICMP) },
                 false,
             )
@@ -269,6 +282,7 @@ mod platform {
         packet[2] = (csum >> 8) as u8;
         packet[3] = (csum & 0xff) as u8;
 
+        // SAFETY: sockaddr_in is plain C data for which all-zero bytes are valid.
         let mut addr: libc::sockaddr_in = unsafe { mem::zeroed() };
         addr.sin_family = sa_family(libc::AF_INET)?;
         addr.sin_port = 0;
@@ -280,6 +294,7 @@ mod platform {
         let addr_len = socklen_of::<libc::sockaddr_in>()?;
 
         let send_time = Instant::now();
+        // SAFETY: `packet` and `addr` outlive the call, and the lengths passed are their sizes.
         retry_on_eintr(|| unsafe {
             libc::sendto(
                 fd.fd,
@@ -292,9 +307,12 @@ mod platform {
         })?;
 
         let mut buf = [0u8; 1500];
+        // SAFETY: sockaddr_in is plain C data for which all-zero bytes are valid.
         let mut from: libc::sockaddr_in = unsafe { mem::zeroed() };
         let mut from_len = socklen_of::<libc::sockaddr_in>()?;
 
+        // SAFETY: `buf`, `from` and `from_len` outlive the call, and `from_len` holds the size
+        // of `from`.
         let received = retry_on_eintr(|| unsafe {
             libc::recvfrom(
                 fd.fd,
@@ -370,6 +388,7 @@ mod platform {
     struct HandleGuard(isize);
     impl Drop for HandleGuard {
         fn drop(&mut self) {
+            // SAFETY: the guard owns the handle from IcmpCreateFile and closes it once, here.
             unsafe {
                 IcmpCloseHandle(self.0 as *mut std::ffi::c_void);
             }
@@ -384,6 +403,9 @@ mod platform {
         _ident: u16,
         payload: &[u8; 24],
     ) -> io::Result<(usize, Duration)> {
+        // SAFETY: the handle is checked before use and closed by its guard. The request and reply
+        // buffers outlive the call, with their real lengths passed, and the reply buffer holds
+        // an ICMP_ECHO_REPLY when the call reports a reply.
         unsafe {
             let handle = IcmpCreateFile();
             if handle == INVALID_HANDLE_VALUE {
@@ -424,7 +446,10 @@ mod platform {
         payload: &[u8; 24],
     ) -> io::Result<(usize, Duration)> {
         #[repr(C)]
-        #[allow(clippy::struct_field_names)]
+        #[expect(
+            clippy::struct_field_names,
+            reason = "fields mirror the Windows SOCKADDR_IN6 layout"
+        )]
         struct SockAddrIn6 {
             sin6_family: u16,
             sin6_port: u16,
@@ -434,6 +459,7 @@ mod platform {
         }
 
         #[link(name = "iphlpapi")]
+        // SAFETY: these are the iphlpapi declarations of Icmp6CreateFile and Icmp6SendEcho2.
         unsafe extern "system" {
             fn Icmp6CreateFile() -> isize;
             fn Icmp6SendEcho2(
@@ -452,6 +478,8 @@ mod platform {
             ) -> u32;
         }
 
+        // SAFETY: the handle is checked before use and closed by its guard. The addresses and
+        // buffers outlive the call, with their real lengths passed.
         unsafe {
             let handle = Icmp6CreateFile();
             if handle == INVALID_HANDLE_VALUE as isize {

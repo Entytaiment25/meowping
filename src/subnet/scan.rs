@@ -201,11 +201,11 @@ pub(super) fn format_scan_header(
     );
 
     if let Some(p) = port {
-        write!(&mut message, " port {p}").expect("writing to String should not fail");
+        let _ = write!(&mut message, " port {p}"); // writing to a String cannot fail
     }
 
     if let Some(s) = suffix {
-        write!(&mut message, " {s}").expect("writing to String should not fail");
+        let _ = write!(&mut message, " {s}"); // writing to a String cannot fail
     }
 
     message

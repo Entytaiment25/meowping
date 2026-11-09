@@ -50,7 +50,7 @@ struct DnsAnswer {
     ancount: u16,
 }
 
-fn parse_response(buf: &[u8], expected_id: u16) -> Option<DnsAnswer> {
+const fn parse_response(buf: &[u8], expected_id: u16) -> Option<DnsAnswer> {
     if buf.len() < 12 {
         return None;
     }
@@ -62,7 +62,7 @@ fn parse_response(buf: &[u8], expected_id: u16) -> Option<DnsAnswer> {
         return None;
     }
     Some(DnsAnswer {
-        rcode: u8::try_from(flags & 0x0F).expect("4-bit mask fits in u8"),
+        rcode: buf[3] & 0x0F,
         ancount: u16::from_be_bytes([buf[6], buf[7]]),
     })
 }

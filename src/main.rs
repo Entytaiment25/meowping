@@ -144,7 +144,10 @@ fn handle_multi_icmp(
 }
 
 #[inline(never)]
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the CLI flags one to one, a params struct would only rename them"
+)]
 fn handle_single_destination(
     destination_input: &str,
     port: Option<u16>,
@@ -246,7 +249,10 @@ const fn compute_per_host_attempts(scan_like: bool, explicit_count: bool, count:
 
 const MAX_SUBNET_MATRIX: usize = 4096;
 
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is an independent CLI flag"
+)]
 struct ProbeCtx<'a> {
     destination_input: &'a str,
     destinations: &'a [String],
@@ -456,7 +462,10 @@ fn resolve_targets(destination_input: &str) -> ResolvedTargets {
     }
 }
 
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is an independent CLI flag"
+)]
 struct SimpleFlags {
     minimal: bool,
     http_check: bool,
@@ -490,6 +499,84 @@ fn parse_simple_flags(args: &Arguments, cfg: Option<&config::Config>) -> SimpleF
     }
 }
 
+/// Fails when a mode that cannot scan subnets was asked to.
+fn reject_subnet(has_subnet: bool, mode: &str) -> Result<(), Box<dyn Error>> {
+    if has_subnet {
+        return Err(format!("{mode} is not supported for subnet targets").into());
+    }
+    Ok(())
+}
+
+/// What a DNS ping run needs besides the domain.
+struct DnsRun {
+    timeout: u64,
+    count: usize,
+    minimal: bool,
+    server: std::net::SocketAddr,
+}
+
+impl DnsRun {
+    fn run(
+        &self,
+        destinations: &[String],
+        input: &str,
+        is_multi: bool,
+    ) -> Result<(), Box<dyn Error>> {
+        if is_multi {
+            self.ping_all(destinations);
+            Ok(())
+        } else {
+            self.ping(input)
+        }
+    }
+
+    fn ping(&self, domain: &str) -> Result<(), Box<dyn Error>> {
+        perform_dns(domain, self.timeout, self.count, self.minimal, self.server)
+    }
+
+    /// Pings every domain, reporting a failed one and moving on.
+    fn ping_all(&self, domains: &[String]) {
+        for domain in domains {
+            if let Err(e) = self.ping(domain) {
+                output::print_with_prefix(self.minimal, &format!("{domain}: {e}").red());
+            }
+        }
+    }
+}
+
+/// The `-t/--timeout` value in milliseconds, 1000 by default.
+fn parse_timeout(args: &mut Arguments) -> Result<u64, Box<dyn Error>> {
+    let timeout = args
+        .opt_value_from_str(["-t", "--timeout"])
+        .map_err(|_| "Failed to parse timeout argument")?
+        .unwrap_or(1000);
+    validate_timeout(timeout).map_err(|e| -> Box<dyn Error> { e.into() })?;
+    Ok(timeout)
+}
+
+/// The ports of `-p/--port`, when given.
+fn parse_port_option(args: &mut Arguments) -> Result<Option<Vec<u16>>, Box<dyn Error>> {
+    let ports = args
+        .opt_value_from_str::<String, 2>(["-p", "--port"])
+        .map_err(|_| "Failed to parse port argument")?
+        .map(|s| parse_ports(&s))
+        .transpose()?;
+    Ok(ports)
+}
+
+/// Handles `--help` and `--version`. True when one was printed and there is nothing to run.
+fn print_help_or_version(args: &Arguments) -> bool {
+    if args.contains(["-h", "--help"]) {
+        output::print_help();
+        return true;
+    }
+    if args.contains(["-V", "--version"]) {
+        println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+        return true;
+    }
+    false
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(target_os = "windows")]
     fix_ansicolor::enable_ansi_support();
@@ -498,13 +585,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut args = Arguments::from_env();
 
-    if args.contains(["-h", "--help"]) {
-        output::print_help();
-        return Ok(());
-    }
-
-    if args.contains(["-V", "--version"]) {
-        println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+    if print_help_or_version(&args) {
         return Ok(());
     }
 
@@ -520,19 +601,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         payload,
     } = parse_simple_flags(&args, cfg);
 
-    let timeout = args
-        .opt_value_from_str(["-t", "--timeout"])
-        .map_err(|_| "Failed to parse timeout argument")?
-        .unwrap_or(1000);
-    validate_timeout(timeout).map_err(|e| -> Box<dyn Error> { e.into() })?;
-
+    let timeout = parse_timeout(&mut args)?;
     let (count, explicit_count) = parse_count(&mut args)?;
-
-    let ports: Option<Vec<u16>> = args
-        .opt_value_from_str::<String, 2>(["-p", "--port"])
-        .map_err(|_| "Failed to parse port argument")?
-        .map(|s| parse_ports(&s))
-        .transpose()?;
+    let ports = parse_port_option(&mut args)?;
 
     let destination_input = read_destination(&mut args)?;
     let ResolvedTargets {
@@ -542,10 +613,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         ipv6_subnet_target,
     } = resolve_targets(&destination_input);
 
-    let scan_like = is_multi
-        || subnet_target.is_some()
-        || ipv6_subnet_target.is_some()
-        || ports.as_ref().is_some_and(|p| p.len() > 1);
+    let has_subnet = subnet_target.is_some() || ipv6_subnet_target.is_some();
+    let scan_like = is_multi || has_subnet || ports.as_ref().is_some_and(|p| p.len() > 1);
     let per_host_attempts: usize = compute_per_host_attempts(scan_like, explicit_count, count);
 
     if !minimal {
@@ -553,9 +622,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if http_check {
-        if subnet_target.is_some() || ipv6_subnet_target.is_some() {
-            return Err("HTTP checking is not supported for subnet targets".into());
-        }
+        reject_subnet(has_subnet, "HTTP checking")?;
         let http_headers = cfg.map_or(&[][..], |c| c.http_headers.as_slice());
         handle_http_check(
             &destinations,
@@ -570,19 +637,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if args.contains(["-d", "--dns"]) {
-        if subnet_target.is_some() || ipv6_subnet_target.is_some() {
-            return Err("DNS ping is not supported for subnet targets".into());
-        }
-        if is_multi {
-            for domain in &destinations {
-                if let Err(e) = perform_dns(domain, timeout, count, minimal, dns_server) {
-                    output::print_with_prefix(minimal, &format!("{domain}: {e}").red());
-                }
-            }
-        } else {
-            perform_dns(&destination_input, timeout, count, minimal, dns_server)?;
-        }
-        return Ok(());
+        reject_subnet(has_subnet, "DNS ping")?;
+        let dns = DnsRun {
+            timeout,
+            count,
+            minimal,
+            server: dns_server,
+        };
+        return dns.run(&destinations, &destination_input, is_multi);
     }
 
     if udp && ports.is_none() {

@@ -29,11 +29,13 @@ impl Config {
         let content = fs::read_to_string(path)
             .map_err(|e| format!("Failed to read config file '{}': {}", path.display(), e))?;
 
-        let mut minimal = None;
-        let mut no_asn = None;
-        let mut dns_server = None;
-        let mut classic_payload = None;
-        let mut http_headers = Vec::new();
+        let mut config = Self {
+            minimal: None,
+            no_asn: None,
+            dns_server: None,
+            classic_payload: None,
+            http_headers: Vec::new(),
+        };
         let mut section = Section::Headers;
 
         for (i, line) in content.lines().enumerate() {
@@ -51,30 +53,7 @@ impl Config {
             }
 
             match section {
-                Section::Settings => {
-                    let (key, value) = line.split_once('=').ok_or_else(|| {
-                        format!(
-                            "Config line {}: expected 'key = value', got: {}",
-                            i + 1,
-                            line
-                        )
-                    })?;
-                    match key.trim() {
-                        "minimal" => minimal = Some(parse_bool(value.trim(), i + 1)?),
-                        "no_asn" => no_asn = Some(parse_bool(value.trim(), i + 1)?),
-                        "classic_payload" => {
-                            classic_payload = Some(parse_bool(value.trim(), i + 1)?);
-                        }
-                        "dns_server" => dns_server = Some(parse_dns_server(value.trim(), i + 1)?),
-                        unknown => {
-                            return Err(format!(
-                                "Config line {}: unknown setting '{}'",
-                                i + 1,
-                                unknown
-                            ));
-                        }
-                    }
-                }
+                Section::Settings => config.apply_setting(line, i + 1)?,
                 Section::Headers => {
                     if !line.contains(':') {
                         return Err(format!(
@@ -83,18 +62,28 @@ impl Config {
                             line
                         ));
                     }
-                    http_headers.push(line.to_string());
+                    config.http_headers.push(line.to_string());
                 }
             }
         }
 
-        Ok(Self {
-            minimal,
-            no_asn,
-            dns_server,
-            classic_payload,
-            http_headers,
-        })
+        Ok(config)
+    }
+
+    /// Applies one `key = value` line of the `[settings]` section.
+    fn apply_setting(&mut self, line: &str, number: usize) -> Result<(), String> {
+        let (key, value) = line
+            .split_once('=')
+            .ok_or_else(|| format!("Config line {number}: expected 'key = value', got: {line}"))?;
+        let value = value.trim();
+        match key.trim() {
+            "minimal" => self.minimal = Some(parse_bool(value, number)?),
+            "no_asn" => self.no_asn = Some(parse_bool(value, number)?),
+            "classic_payload" => self.classic_payload = Some(parse_bool(value, number)?),
+            "dns_server" => self.dns_server = Some(parse_dns_server(value, number)?),
+            unknown => return Err(format!("Config line {number}: unknown setting '{unknown}'")),
+        }
+        Ok(())
     }
 }
 

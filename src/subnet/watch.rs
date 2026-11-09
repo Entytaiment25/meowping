@@ -64,6 +64,7 @@ extern "C" fn watch_signal_handler(_sig: libc::c_int) {
 
 #[cfg(unix)]
 fn install_watch_interrupt_handler() {
+    // SAFETY: the handler only stores to an atomic, which is async-signal-safe.
     unsafe {
         libc::signal(
             libc::SIGINT,
@@ -86,8 +87,25 @@ unsafe extern "system" fn watch_ctrl_handler(ctrl_type: u32) -> i32 {
 #[cfg(windows)]
 fn install_watch_interrupt_handler() {
     use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
+    // SAFETY: the handler is a valid `extern "system"` fn that only stores to an atomic.
     unsafe {
         SetConsoleCtrlHandler(Some(watch_ctrl_handler), 1);
+    }
+}
+
+/// Prints one round: over the alternate screen when live, below the header otherwise.
+fn draw_round(live_redraw: bool, header_line: &str, content_lines: &[String]) {
+    use std::io::Write as _;
+
+    if live_redraw {
+        println!("\x1b[H{header_line}");
+    }
+    for line in content_lines {
+        println!("{line}");
+    }
+    if live_redraw {
+        print!("\x1b[J");
+        let _ = std::io::stdout().flush();
     }
 }
 
@@ -143,18 +161,7 @@ pub(super) fn perform_subnet_watch(hosts: &[IpAddr], cfg: &ScanConfig) {
 
         let content_lines = watch_round_lines(&results, round, cfg.minimal);
 
-        if live_redraw {
-            println!("\x1b[H{header_line}");
-            for line in &content_lines {
-                println!("{line}");
-            }
-            print!("\x1b[J");
-            let _ = std::io::stdout().flush();
-        } else {
-            for line in &content_lines {
-                println!("{line}");
-            }
-        }
+        draw_round(live_redraw, &header_line, &content_lines);
 
         if WATCH_INTERRUPTED.load(Ordering::SeqCst) {
             break;

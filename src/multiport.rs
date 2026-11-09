@@ -19,6 +19,16 @@ enum PortVerdict {
     NoResponse,
 }
 
+impl PortVerdict {
+    /// The round trip of an open port, in microseconds.
+    const fn rtt_us(self) -> Option<u128> {
+        match self {
+            Self::Open { rtt_us } => Some(rtt_us),
+            Self::Closed | Self::NoResponse => None,
+        }
+    }
+}
+
 struct PortResult {
     host: String,
     port: u16,
@@ -243,6 +253,37 @@ fn fetch_asns_concurrent(ips: &[IpAddr], no_asn: bool, timeout_ms: u64) -> HashM
     map
 }
 
+/// The responsive hosts, sorted, as `[a, b]`. Nothing is printed when there are none.
+fn print_responsive_list(hosts: &HashSet<String>, minimal: bool) {
+    let mut sorted: Vec<&String> = hosts.iter().collect();
+    sorted.sort();
+    if sorted.is_empty() {
+        return;
+    }
+    let entries = sorted
+        .iter()
+        .map(|h| h.green())
+        .collect::<Vec<_>>()
+        .join(", ");
+    print_with_prefix(minimal, &format!("[{entries}]"));
+}
+
+/// One probe of `ip:port`, over UDP with `payload` or by a TCP connect.
+fn probe_verdict(
+    ip: IpAddr,
+    port: u16,
+    udp: bool,
+    payload: &[u8],
+    timeout: Duration,
+    timeout_ms: u64,
+) -> PortVerdict {
+    if udp {
+        verdict_from_udp(udp_probe_once(SocketAddr::new(ip, port), payload, timeout))
+    } else {
+        verdict_from_tcp(tcp_connect_once(ip, port, timeout_ms))
+    }
+}
+
 pub fn perform_host_scan(
     hosts: &[String],
     port: u16,
@@ -275,22 +316,12 @@ pub fn perform_host_scan(
         for chunk in resolved.chunks(CHUNK) {
             let mut handles = Vec::with_capacity(chunk.len());
             for (_, ip) in chunk {
-                let Some(ip) = *ip else {
-                    handles.push(None);
-                    continue;
-                };
-                let payload = payload.clone();
-                handles.push(Some(thread::spawn(move || {
-                    if udp {
-                        verdict_from_udp(udp_probe_once(
-                            SocketAddr::new(ip, port),
-                            &payload,
-                            timeout_dur,
-                        ))
-                    } else {
-                        verdict_from_tcp(tcp_connect_once(ip, port, timeout_ms))
-                    }
-                })));
+                handles.push(ip.map(|ip| {
+                    let payload = payload.clone();
+                    thread::spawn(move || {
+                        probe_verdict(ip, port, udp, &payload, timeout_dur, timeout_ms)
+                    })
+                }));
             }
             for ((host, ip), handle) in chunk.iter().zip(handles) {
                 let verdict = handle
@@ -304,12 +335,8 @@ pub fn perform_host_scan(
                     port,
                     verdict,
                 };
-                let entry = format_port_result(&res, asn, udp, minimal);
-                println!("{entry}");
-                let rtt = match verdict {
-                    PortVerdict::Open { rtt_us } => Some(rtt_us),
-                    PortVerdict::Closed | PortVerdict::NoResponse => None,
-                };
+                println!("{}", format_port_result(&res, asn, udp, minimal));
+                let rtt = verdict.rtt_us();
                 stats.record(rtt.is_some(), rtt);
                 if rtt.is_some() {
                     responsive_hosts.insert((*host).clone());
@@ -322,17 +349,7 @@ pub fn perform_host_scan(
     }
 
     if minimal {
-        let mut responsive_list: Vec<String> = responsive_hosts.iter().cloned().collect();
-        responsive_list.sort();
-        if !responsive_list.is_empty() {
-            let entries = responsive_list
-                .iter()
-                .map(|h| h.green())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let message = format!("[{entries}]");
-            print_with_prefix(minimal, &message);
-        }
+        print_responsive_list(&responsive_hosts, minimal);
     }
     let summary = format!(
         "Hosts responsive: {}/{}",
@@ -469,7 +486,10 @@ pub fn perform_multiport_hosts(
     aggregate(&all_results, ports, minimal, proto_label);
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the CLI flags one to one, a params struct would only rename them"
+)]
 pub fn perform_multiport_subnet<I>(
     host_label: &str,
     hosts: I,
