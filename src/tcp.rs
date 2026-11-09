@@ -95,6 +95,17 @@ impl AsnLookup {
         }
     }
 
+    /// The label, waiting for the lookup to finish. Used for the last line so a
+    /// short run (`-c 1`) still gets its ASN. The lookup is bounded by its timeout.
+    pub fn label_final(&mut self) -> &str {
+        if let Some(rx) = self.rx.take()
+            && let Ok(org) = rx.recv()
+        {
+            self.label = org;
+        }
+        &self.label
+    }
+
     /// The label so far. Cached, private and `-a` lookups finish within the grace
     /// period, so only a real network lookup can leave the first lines without it.
     pub fn label(&mut self) -> &str {
@@ -155,8 +166,12 @@ pub fn perform_connection(
         let duration = measure_connection_time(ip_lookup, port, timeout);
         stats.record(duration.is_some(), duration.map(|d| d.as_micros()));
 
-        let status_message =
-            format_connection_status(ip_lookup, asn.label(), port, duration, minimal);
+        let label = if attempt_idx + 1 == count {
+            asn.label_final()
+        } else {
+            asn.label()
+        };
+        let status_message = format_connection_status(ip_lookup, label, port, duration, minimal);
         println!("{status_message}");
 
         if attempt_idx + 1 != count {

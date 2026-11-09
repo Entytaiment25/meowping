@@ -179,7 +179,12 @@ pub fn perform_udp(
     for attempt_idx in 0..count {
         let outcome = udp_probe_once(ip_lookup, &payload, timeout_dur);
         let is_open = matches!(outcome, ProbeOutcome::Open { .. });
-        let entry = format_udp_status(ip_lookup.ip(), asn.label(), port, &outcome, minimal);
+        let label = if attempt_idx + 1 == count {
+            asn.label_final()
+        } else {
+            asn.label()
+        };
+        let entry = format_udp_status(ip_lookup.ip(), label, port, &outcome, minimal);
         println!("{entry}");
 
         stats.record(is_open, outcome_rtt(&outcome));
