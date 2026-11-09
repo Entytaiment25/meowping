@@ -95,8 +95,6 @@ impl AsnLookup {
         }
     }
 
-    /// The label, waiting for the lookup to finish. Used for the last line so a
-    /// short run (`-c 1`) still gets its ASN. The lookup is bounded by its timeout.
     pub fn label_final(&mut self) -> &str {
         if let Some(rx) = self.rx.take()
             && let Ok(org) = rx.recv()
