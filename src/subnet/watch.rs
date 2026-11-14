@@ -4,7 +4,6 @@ use super::scan::{
 };
 use crate::colors::Colorize;
 use crate::output::{PingStats, format_with_prefix, print_statistics};
-use std::collections::HashSet;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -13,18 +12,10 @@ use std::time::Duration;
 const WATCH_HOSTS_PER_ROW: usize = 8;
 
 fn watch_minimal_line(results: &[ScanResult]) -> String {
-    let mut responsive: Vec<IpAddr> = results
+    let entries = results
         .iter()
         .filter(|r| r.is_responsive())
-        .map(|r| r.host)
-        .collect();
-    responsive.sort_by_key(|ip| match ip {
-        IpAddr::V4(v4) => (0, u128::from(u32::from(*v4))),
-        IpAddr::V6(v6) => (1, u128::from(*v6)),
-    });
-    let entries = responsive
-        .iter()
-        .map(|ip| ip.to_string().green())
+        .map(|r| r.host.to_string().green())
         .collect::<Vec<_>>()
         .join(", ");
     format!("[{entries}]")
@@ -141,7 +132,7 @@ pub(super) fn perform_subnet_watch(hosts: &[IpAddr], cfg: &ScanConfig) {
     let mut seq: u16 = 1;
     let mut round: u64 = 0;
     let mut stats = PingStats::default();
-    let mut responsive_hosts: HashSet<IpAddr> = HashSet::new();
+    let mut responsive = vec![false; hosts.len()];
 
     while !WATCH_INTERRUPTED.load(Ordering::SeqCst) {
         if max_rounds.is_some_and(|limit| round >= u64::try_from(limit).unwrap_or(u64::MAX)) {
@@ -152,11 +143,9 @@ pub(super) fn perform_subnet_watch(hosts: &[IpAddr], cfg: &ScanConfig) {
         round += 1;
         let results = probe_chunk(hosts, &cfg.kind, &mut seq);
 
-        for status in &results {
+        for (status, seen) in results.iter().zip(&mut responsive) {
             stats.record(status.is_responsive(), status.latency_us());
-            if status.is_responsive() {
-                responsive_hosts.insert(status.host);
-            }
+            *seen |= status.is_responsive();
         }
 
         let content_lines = watch_round_lines(&results, round, cfg.minimal);
@@ -178,8 +167,12 @@ pub(super) fn perform_subnet_watch(hosts: &[IpAddr], cfg: &ScanConfig) {
     }
 
     if cfg.minimal {
-        print_responsive_minimal(&responsive_hosts, cfg.minimal);
+        print_responsive_minimal(hosts, &responsive, cfg.minimal);
     }
-    print_host_summary(hosts.len(), responsive_hosts.len(), cfg.minimal);
+    print_host_summary(
+        hosts.len(),
+        responsive.iter().filter(|&&up| up).count(),
+        cfg.minimal,
+    );
     print_statistics(&format!("{} subnet", cfg.kind.header_protocol()), &stats);
 }

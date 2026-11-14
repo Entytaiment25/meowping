@@ -4,6 +4,16 @@ extern crate windres;
 fn main() {
     #[cfg(windows)]
     windows::compile_resources_file();
+
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        for flag in [
+            "-no_data_const",
+            "-no_function_starts",
+            "-no_data_in_code_info",
+        ] {
+            println!("cargo:rustc-link-arg-bins=-Wl,{flag}");
+        }
+    }
 }
 
 #[cfg(windows)]

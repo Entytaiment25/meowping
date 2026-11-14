@@ -1,6 +1,6 @@
 use crate::colors::Colorize;
 use crate::output::{
-    PingStats, TIME_COLUMN_WIDTH, color_time_padded, micros_to_ms, print_statistics,
+    PingStats, TIME_COLUMN_WIDTH, color_time_padded, format_ms, micros, print_statistics,
     print_with_prefix,
 };
 use std::error::Error;
@@ -80,6 +80,10 @@ mod platform {
         Ok(())
     }
 
+    #[allow(
+        clippy::unnecessary_fallible_conversions,
+        reason = "suseconds_t is i32 on macOS but i64 on Linux, where the conversion cannot fail"
+    )]
     fn set_recv_timeout(fd: RawFd, timeout: Duration) -> io::Result<()> {
         let tv = libc::timeval {
             tv_sec: libc::time_t::try_from(timeout.as_secs())
@@ -564,14 +568,13 @@ pub fn perform_icmp(
     for attempt_idx in 0..count {
         let start = Instant::now();
         let result = ping_host_once(ip, seq, timeout, ttl, ident, payload);
-        let elapsed_us = start.elapsed().as_micros();
+        let elapsed_us = micros(start.elapsed());
         let display_seq = attempt_idx + 1;
 
         match result {
             Ok((bytes, rtt)) => {
-                stats.record(true, Some(rtt.as_micros()));
-                let time_ms = rtt.as_secs_f64() * 1000.0;
-                let time_str = color_time_padded(time_ms, TIME_COLUMN_WIDTH);
+                stats.record(true, Some(micros(rtt)));
+                let time_str = color_time_padded(micros(rtt), TIME_COLUMN_WIDTH);
                 let msg = format!(
                     "Reply from {}: bytes={} icmp_seq={} time={} TTL={} Identifier={}",
                     ip.to_string().green(),
@@ -593,7 +596,7 @@ pub fn perform_icmp(
                     format!(
                         "Request timeout for icmp_seq {} time={:>TIME_COLUMN_WIDTH$} TTL={} Identifier={}",
                         display_seq,
-                        format!("{:.2}ms", micros_to_ms(elapsed_us)),
+                        format_ms(elapsed_us),
                         ttl,
                         ident
                     )

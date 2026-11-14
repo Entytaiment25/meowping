@@ -5,13 +5,13 @@ use std::time::Duration;
 pub struct PingStats {
     attempts: usize,
     successes: usize,
-    min_us: Option<u128>,
-    max_us: u128,
-    sum_us: u128,
+    min_us: Option<u64>,
+    max_us: u64,
+    sum_us: u64,
 }
 
 impl PingStats {
-    pub fn record(&mut self, success: bool, rtt: Option<u128>) {
+    pub fn record(&mut self, success: bool, rtt: Option<u64>) {
         self.attempts = self.attempts.saturating_add(1);
         if success {
             self.successes += 1;
@@ -49,8 +49,19 @@ pub fn print_resolution_failure(host: &str, minimal: bool) {
     print_with_prefix(minimal, &message);
 }
 
-pub fn micros_to_ms(micros: u128) -> f64 {
-    Duration::from_micros(u64::try_from(micros).unwrap_or(u64::MAX)).as_secs_f64() * 1000.0
+pub fn micros(duration: Duration) -> u64 {
+    duration
+        .as_secs()
+        .saturating_mul(1_000_000)
+        .saturating_add(u64::from(duration.subsec_micros()))
+}
+
+fn hundredths(value: u64, suffix: &str) -> String {
+    format!("{}.{:02}{suffix}", value / 100, value % 100)
+}
+
+pub fn format_ms(micros: u64) -> String {
+    hundredths(micros.saturating_add(5) / 10, "ms")
 }
 
 pub fn print_statistics(protocol: &str, stats: &PingStats) {
@@ -58,23 +69,13 @@ pub fn print_statistics(protocol: &str, stats: &PingStats) {
     let successes = stats.successes();
     let failed = count.saturating_sub(successes);
 
-    let (min_time, max_time, avg_time) = if successes == 0 {
-        (0.0, 0.0, 0.0)
-    } else {
-        let min = micros_to_ms(stats.min_us.unwrap_or(0));
-        let max = micros_to_ms(stats.max_us);
-        let sample_count = f64::from(u32::try_from(successes).unwrap_or(u32::MAX));
-        let avg = micros_to_ms(stats.sum_us) / sample_count;
-        (min, max, avg)
-    };
+    let samples = u64::try_from(successes).unwrap_or(u64::MAX).max(1);
+    let min_time = stats.min_us.unwrap_or(0);
+    let avg_time = stats.sum_us / samples;
 
-    let loss_percentage = if count > 0 {
-        let failed_count = f64::from(u32::try_from(failed).unwrap_or(u32::MAX));
-        let total_count = f64::from(u32::try_from(count).unwrap_or(u32::MAX));
-        (failed_count / total_count) * 100.0
-    } else {
-        0.0
-    };
+    let total = u64::try_from(count).unwrap_or(u64::MAX).max(1);
+    let failures = u64::try_from(failed).unwrap_or(u64::MAX);
+    let loss = (failures.saturating_mul(10_000).saturating_add(total / 2)) / total;
 
     println!("\n{protocol} Ping statistics:");
     println!(
@@ -82,28 +83,28 @@ pub fn print_statistics(protocol: &str, stats: &PingStats) {
         count.to_string().bright_blue(),
         successes.to_string().bright_blue(),
         failed.to_string().bright_blue(),
-        format!("{loss_percentage:.2}%").bright_blue()
+        hundredths(loss, "%").bright_blue()
     );
     println!("Approximate round trip times:");
     println!(
         "\tMinimum = {}, Maximum = {}, Average = {}",
-        format!("{min_time:.2}ms").bright_blue(),
-        format!("{max_time:.2}ms").bright_blue(),
-        format!("{avg_time:.2}ms").bright_blue()
+        format_ms(min_time).bright_blue(),
+        format_ms(stats.max_us).bright_blue(),
+        format_ms(avg_time).bright_blue()
     );
 }
 
 pub const TIME_COLUMN_WIDTH: usize = 9;
 
-pub fn color_time(time_ms: f64) -> String {
-    color_time_padded(time_ms, 0)
+pub fn color_time(micros: u64) -> String {
+    color_time_padded(micros, 0)
 }
 
-pub fn color_time_padded(time_ms: f64, width: usize) -> String {
-    let msg = format!("{:>width$}", format!("{time_ms:.2}ms"));
-    match time_ms {
-        t if t >= 250.0 => msg.orange(),
-        t if t >= 100.0 => msg.yellow(),
+pub fn color_time_padded(micros: u64, width: usize) -> String {
+    let msg = format!("{:>width$}", format_ms(micros));
+    match micros {
+        t if t >= 250_000 => msg.orange(),
+        t if t >= 100_000 => msg.yellow(),
         _ => msg.green(),
     }
 }

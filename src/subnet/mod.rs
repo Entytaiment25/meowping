@@ -125,12 +125,12 @@ where
     format!("{}/{}", network.into_addr(), prefix)
 }
 
-fn compute_host_count(prefix: u8, address_bits: u32) -> u128 {
+fn compute_host_count(prefix: u8, address_bits: u32) -> u64 {
     let host_bits = address_bits.saturating_sub(u32::from(prefix));
     if host_bits >= 64 {
-        return u128::MAX;
+        return u64::MAX;
     }
-    let total_addresses = 1u128 << host_bits;
+    let total_addresses = 1u64 << host_bits;
 
     if u32::from(prefix) >= address_bits - 1 {
         total_addresses
@@ -159,14 +159,14 @@ impl Ipv4Subnet {
         format_subnet_notation(self.network, self.prefix)
     }
 
-    pub fn host_count(self) -> u128 {
+    pub fn host_count(self) -> u64 {
         compute_host_count(self.prefix, 32)
     }
 
     pub fn iter_hosts(self) -> SubnetHostIter<u32> {
-        let total_addresses = 1u128 << (32 - u32::from(self.prefix));
+        let total_addresses = 1u64 << (32 - u32::from(self.prefix));
 
-        let network = u128::from(self.network);
+        let network = u64::from(self.network);
         let (start, end) = if self.prefix >= 31 {
             (network, network + total_addresses - 1)
         } else {
@@ -244,7 +244,7 @@ impl Ipv6Subnet {
         format_subnet_notation(self.network, self.prefix)
     }
 
-    pub fn host_count(&self) -> u128 {
+    pub fn host_count(&self) -> u64 {
         compute_host_count(self.prefix, 128)
     }
 
@@ -300,7 +300,7 @@ mod tests {
         assert_eq!(Ipv4Subnet::from_str("10.0.0.0/32").unwrap().host_count(), 1);
         assert_eq!(
             Ipv4Subnet::from_str("0.0.0.0/0").unwrap().host_count(),
-            (1u128 << 32) - 2
+            (1u64 << 32) - 2
         );
     }
 

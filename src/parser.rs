@@ -75,15 +75,7 @@ impl Parser {
     }
 
     fn is_resolvable_hostname(hostname: &str) -> bool {
-        use std::net::ToSocketAddrs;
-        let socket_str = if hostname.contains(':') {
-            format!("[{hostname}]:80")
-        } else {
-            format!("{hostname}:80")
-        };
-        socket_str
-            .to_socket_addrs()
-            .is_ok_and(|mut addrs| addrs.next().is_some())
+        crate::tcp::resolve_ip(hostname, 80).is_ok()
     }
 }
 

@@ -2,10 +2,9 @@ use super::watch::perform_subnet_watch;
 use super::{Ipv4Subnet, Ipv6Subnet};
 use crate::colors::Colorize;
 use crate::icmp::ping_host_once;
-use crate::output::{color_time, micros_to_ms, print_with_prefix};
+use crate::output::{color_time, micros, print_with_prefix};
 use crate::tcp::tcp_connect_once;
 use crate::udp::{ProbeOutcome, udp_probe_once};
-use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::net::{IpAddr, SocketAddr};
 use std::thread;
@@ -68,7 +67,7 @@ impl ProbeKind {
 
 #[derive(Clone, Copy)]
 enum ScanVerdict {
-    Open { rtt_us: u128 },
+    Open { rtt_us: u64 },
     Down,
     UdpClosed,
     UdpNoResponse,
@@ -81,7 +80,7 @@ pub(super) struct ScanResult {
 }
 
 impl ScanResult {
-    pub(super) const fn latency_us(&self) -> Option<u128> {
+    pub(super) const fn latency_us(&self) -> Option<u64> {
         match self.verdict {
             ScanVerdict::Open { rtt_us } => Some(rtt_us),
             _ => None,
@@ -99,7 +98,7 @@ impl ScanResult {
                 if minimal {
                     colored_ip
                 } else {
-                    format!("{} {}", colored_ip, color_time(micros_to_ms(rtt_us)))
+                    format!("{} {}", colored_ip, color_time(rtt_us))
                 }
             }
             ScanVerdict::Down => self.host.to_string().red(),
@@ -121,62 +120,62 @@ pub(super) fn probe_chunk(hosts: &[IpAddr], kind: &ProbeKind, seq: &mut u16) -> 
     results
 }
 
+fn probe_once(host: IpAddr, kind: ProbeKind, seq: u16) -> ScanVerdict {
+    match kind {
+        ProbeKind::Tcp { port, timeout_ms } => {
+            tcp_connect_once(host, port, timeout_ms).map_or(ScanVerdict::Down, |latency| {
+                ScanVerdict::Open {
+                    rtt_us: micros(latency),
+                }
+            })
+        }
+        ProbeKind::Udp { port, timeout } => {
+            let payload = crate::udp::probe_payload(port);
+            match udp_probe_once(SocketAddr::new(host, port), &payload, timeout) {
+                ProbeOutcome::Open { rtt, .. } => ScanVerdict::Open {
+                    rtt_us: micros(rtt),
+                },
+                ProbeOutcome::Closed => ScanVerdict::UdpClosed,
+                ProbeOutcome::NoResponse => ScanVerdict::UdpNoResponse,
+            }
+        }
+        ProbeKind::Icmp {
+            timeout,
+            ttl,
+            ident,
+            payload,
+        } => match ping_host_once(host, seq, timeout, ttl, ident, &payload) {
+            Ok((_bytes, rtt)) => ScanVerdict::Open {
+                rtt_us: micros(rtt),
+            },
+            Err(_) => ScanVerdict::Down,
+        },
+    }
+}
+
 fn probe_batch(hosts: &[IpAddr], kind: &ProbeKind, seq: &mut u16) -> Vec<ScanResult> {
+    let kind = *kind;
+    let fallback = match kind {
+        ProbeKind::Udp { .. } => ScanVerdict::UdpNoResponse,
+        _ => ScanVerdict::Down,
+    };
     let mut handles = Vec::with_capacity(hosts.len());
     for &host in hosts {
-        let verdict = match *kind {
-            ProbeKind::Tcp { port, timeout_ms } => thread::spawn(move || {
-                tcp_connect_once(host, port, timeout_ms).map_or(ScanVerdict::Down, |latency| {
-                    ScanVerdict::Open {
-                        rtt_us: latency.as_micros(),
-                    }
-                })
-            }),
-            ProbeKind::Udp { port, timeout } => {
-                let payload = crate::udp::probe_payload(port);
-                thread::spawn(move || {
-                    let addr = SocketAddr::new(host, port);
-                    match udp_probe_once(addr, &payload, timeout) {
-                        ProbeOutcome::Open { rtt, .. } => ScanVerdict::Open {
-                            rtt_us: rtt.as_micros(),
-                        },
-                        ProbeOutcome::Closed => ScanVerdict::UdpClosed,
-                        ProbeOutcome::NoResponse => ScanVerdict::UdpNoResponse,
-                    }
-                })
-            }
-            ProbeKind::Icmp {
-                timeout,
-                ttl,
-                ident,
-                payload,
-            } => {
-                let current_seq = *seq;
-                *seq = seq.wrapping_add(1);
-                thread::spawn(move || {
-                    match ping_host_once(host, current_seq, timeout, ttl, ident, &payload) {
-                        Ok((_bytes, rtt)) => ScanVerdict::Open {
-                            rtt_us: rtt.as_micros(),
-                        },
-                        Err(_) => ScanVerdict::Down,
-                    }
-                })
-            }
-        };
-        handles.push((host, verdict));
+        let current_seq = *seq;
+        if matches!(kind, ProbeKind::Icmp { .. }) {
+            *seq = seq.wrapping_add(1);
+        }
+        handles.push((
+            host,
+            thread::spawn(move || probe_once(host, kind, current_seq)),
+        ));
     }
 
     handles
         .into_iter()
-        .map(|(host, handle)| {
-            let fallback = match kind {
-                ProbeKind::Udp { .. } => ScanVerdict::UdpNoResponse,
-                _ => ScanVerdict::Down,
-            };
-            ScanResult {
-                host,
-                verdict: handle.join().unwrap_or(fallback),
-            }
+        .map(|(host, handle)| ScanResult {
+            host,
+            verdict: handle.join().unwrap_or(fallback),
         })
         .collect()
 }
@@ -189,7 +188,7 @@ pub(super) fn format_scan_header(
     verb: &str,
     protocol: &str,
     subnet_notation: &str,
-    host_count: u128,
+    host_count: u64,
     port: Option<u16>,
     suffix: Option<&str>,
 ) -> String {
@@ -220,27 +219,23 @@ pub(super) fn print_host_summary(total: usize, responsive: usize, minimal: bool)
     print_with_prefix(minimal, &summary);
 }
 
-pub(super) fn print_responsive_minimal(responsive_hosts: &HashSet<IpAddr>, minimal: bool) {
-    let mut responsive_list: Vec<IpAddr> = responsive_hosts.iter().copied().collect();
-    responsive_list.sort_by_key(|ip| match ip {
-        IpAddr::V4(v4) => (0, u128::from(u32::from(*v4))),
-        IpAddr::V6(v6) => (1, u128::from(*v6)),
-    });
-    if responsive_list.is_empty() {
+pub(super) fn print_responsive_minimal(hosts: &[IpAddr], responsive: &[bool], minimal: bool) {
+    let entries = hosts
+        .iter()
+        .zip(responsive)
+        .filter(|&(_, &up)| up)
+        .map(|(ip, _)| ip.to_string().green())
+        .collect::<Vec<_>>();
+    if entries.is_empty() {
         return;
     }
-    let entries = responsive_list
-        .iter()
-        .map(|ip| ip.to_string().green())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let message = format!("[{entries}]");
+    let message = format!("[{}]", entries.join(", "));
     print_with_prefix(minimal, &message);
 }
 
 pub(super) struct ScanConfig {
     pub(super) notation: String,
-    pub(super) host_count: u128,
+    pub(super) host_count: u64,
     too_large: bool,
     pub(super) kind: ProbeKind,
     pub(super) rounds: Option<usize>,
@@ -283,31 +278,37 @@ pub enum Subnet {
     V6(Ipv6Subnet),
 }
 
-pub fn perform_subnet_scan(subnet: Subnet, kind: ProbeKind, rounds: Option<usize>, minimal: bool) {
-    let (hosts, notation, host_count, too_large) = match subnet {
-        Subnet::V4(s) => (
-            s.iter_hosts().map(IpAddr::V4).collect::<Vec<_>>(),
-            s.notation(),
-            s.host_count(),
-            false,
-        ),
-        Subnet::V6(s) => {
-            let host_count = s.host_count();
-            (
-                s.iter_hosts().map(IpAddr::V6).collect::<Vec<_>>(),
-                s.notation(),
-                host_count,
-                host_count == u128::MAX,
-            )
+impl Subnet {
+    pub fn notation(self) -> String {
+        match self {
+            Self::V4(s) => s.notation(),
+            Self::V6(s) => s.notation(),
         }
-    };
+    }
 
+    pub fn host_count(self) -> u64 {
+        match self {
+            Self::V4(s) => s.host_count(),
+            Self::V6(s) => s.host_count(),
+        }
+    }
+
+    pub fn hosts(self) -> Vec<IpAddr> {
+        match self {
+            Self::V4(s) => s.iter_hosts().map(IpAddr::V4).collect(),
+            Self::V6(s) => s.iter_hosts().map(IpAddr::V6).collect(),
+        }
+    }
+}
+
+pub fn perform_subnet_scan(subnet: Subnet, kind: ProbeKind, rounds: Option<usize>, minimal: bool) {
+    let host_count = subnet.host_count();
     scan_hosts(
-        &hosts,
+        &subnet.hosts(),
         &ScanConfig {
-            notation,
+            notation: subnet.notation(),
             host_count,
-            too_large,
+            too_large: matches!(subnet, Subnet::V6(_)) && host_count == u64::MAX,
             kind,
             rounds,
             minimal,

@@ -1,56 +1,35 @@
 use crate::asn_cache;
 use crate::colors::Colorize;
 use crate::https;
-use crate::output::{PingStats, TIME_COLUMN_WIDTH, color_time_padded, print_statistics};
+use crate::output::{PingStats, TIME_COLUMN_WIDTH, color_time_padded, micros, print_statistics};
 use std::error::Error;
-use std::fmt;
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
-use std::sync::mpsc::{self, Receiver};
-use std::thread::sleep;
+use std::sync::{Arc, OnceLock};
+use std::thread::{self, sleep};
 use std::time::{Duration, Instant};
 
-#[derive(Debug)]
-struct MeowpingError(String);
-
-impl fmt::Display for MeowpingError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl Error for MeowpingError {}
-
 pub fn resolve_ip(destination: &str, port: u16) -> Result<SocketAddr, Box<dyn Error>> {
-    if let Ok(ip) = destination.parse::<std::net::IpAddr>() {
+    if let Ok(ip) = destination.parse::<IpAddr>() {
         return Ok(SocketAddr::new(ip, port));
     }
-    let with_port = if destination.contains(':') {
-        format!("[{destination}]:{port}")
-    } else {
-        format!("{destination}:{port}")
-    };
-    let addrs: Vec<SocketAddr> = with_port.to_socket_addrs()?.collect();
+    let addrs: Vec<SocketAddr> = (destination, port).to_socket_addrs()?.collect();
     let chosen = addrs
         .iter()
         .find(|a| a.is_ipv4())
         .or_else(|| addrs.first())
-        .ok_or_else(|| {
-            Box::new(MeowpingError(
-                "Unable to find IP address from domain.".to_string(),
-            ))
-        })?;
+        .ok_or("Unable to find IP address from domain.")?;
     Ok(*chosen)
 }
 
-const fn is_private_ip(ip_addr: &std::net::IpAddr) -> bool {
+const fn is_private_ip(ip_addr: &IpAddr) -> bool {
     match ip_addr {
-        std::net::IpAddr::V4(ip) => ip.is_private(),
-        std::net::IpAddr::V6(ip) => ip.is_unique_local(),
+        IpAddr::V4(ip) => ip.is_private(),
+        IpAddr::V6(ip) => ip.is_unique_local(),
     }
 }
 
 pub fn fetch_asn(ip: &str, no_api: bool, timeout: u64) -> Result<String, Box<dyn Error>> {
-    let ip_addr: std::net::IpAddr = ip.parse()?;
+    let ip_addr: IpAddr = ip.parse()?;
 
     if ip_addr.is_loopback() || is_private_ip(&ip_addr) {
         return Ok("Private/Loopback IP".to_string());
@@ -65,8 +44,7 @@ pub fn fetch_asn(ip: &str, no_api: bool, timeout: u64) -> Result<String, Box<dyn
     }
 
     let url = format!("https://ipinfo.io/{ip}/json");
-    let response_text =
-        https::get(&url, timeout).map_err(|e| Box::new(MeowpingError(e.to_string())))?;
+    let response_text = https::get(&url, timeout).map_err(|e| e.to_string())?;
     // No "org" (for example a rate limit reply) is not cached, so the next run retries.
     let Some(org) = extract_asn_from_response(&response_text) else {
         return Ok("Unknown ASN".to_string());
@@ -78,47 +56,40 @@ pub fn fetch_asn(ip: &str, no_api: bool, timeout: u64) -> Result<String, Box<dyn
 /// Runs the ASN lookup on a background thread so pinging can start right away.
 /// Until the result arrives the label is empty and lines are printed without it.
 pub struct AsnLookup {
-    rx: Option<Receiver<String>>,
-    label: String,
+    result: Arc<OnceLock<String>>,
 }
 
 impl AsnLookup {
     pub fn spawn(ip: String, no_api: bool, timeout: u64) -> Self {
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
+        let result = Arc::new(OnceLock::new());
+        let slot = Arc::clone(&result);
+        let waiter = thread::current();
+        thread::spawn(move || {
             let org = fetch_asn(&ip, no_api, timeout).unwrap_or_else(|_| "Unknown ASN".to_string());
-            let _ = tx.send(org);
+            let _ = slot.set(org);
+            waiter.unpark();
         });
-        Self {
-            rx: Some(rx),
-            label: String::new(),
-        }
+        Self { result }
     }
 
-    pub fn label_final(&mut self) -> &str {
-        if let Some(rx) = self.rx.take()
-            && let Ok(org) = rx.recv()
-        {
-            self.label = org;
-        }
-        &self.label
+    pub fn label_final(&self) -> &str {
+        self.result.wait()
     }
 
     /// The label so far. Cached, private and `-a` lookups finish within the grace
     /// period, so only a real network lookup can leave the first lines without it.
-    pub fn label(&mut self) -> &str {
-        if let Some(rx) = &self.rx {
-            let grace = if self.label.is_empty() {
-                Duration::from_millis(25)
-            } else {
-                Duration::ZERO
-            };
-            if let Ok(org) = rx.recv_timeout(grace) {
-                self.label = org;
-                self.rx = None;
+    pub fn label(&self) -> &str {
+        let deadline = Instant::now() + Duration::from_millis(25);
+        loop {
+            if let Some(org) = self.result.get() {
+                return org;
             }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return "";
+            }
+            thread::park_timeout(left);
         }
-        &self.label
     }
 }
 
@@ -155,14 +126,14 @@ pub fn perform_connection(
     port: u16,
     timeout: u64,
     count: usize,
-    asn: &mut AsnLookup,
+    asn: &AsnLookup,
     minimal: bool,
 ) -> PingStats {
     let mut stats = PingStats::default();
 
     for attempt_idx in 0..count {
         let duration = measure_connection_time(ip_lookup, port, timeout);
-        stats.record(duration.is_some(), duration.map(|d| d.as_micros()));
+        stats.record(duration.is_some(), duration.map(micros));
 
         let label = if attempt_idx + 1 == count {
             asn.label_final()
@@ -209,51 +180,26 @@ fn format_connection_status(
     } else {
         format!("{} ", "[MEOWPING]".magenta())
     };
+    let paint: fn(&str) -> String = if duration.is_some() {
+        str::green
+    } else {
+        str::red
+    };
+    let asn_part = if show_asn {
+        format!(" ({})", paint(asn))
+    } else {
+        String::new()
+    };
+    let time = duration.map_or_else(
+        || format!("{:>TIME_COLUMN_WIDTH$}", "timed out").red(),
+        |rtt| color_time_padded(micros(rtt), TIME_COLUMN_WIDTH),
+    );
 
-    duration.map_or_else(
-        || {
-            let status_message = if show_asn {
-                format!(
-                    "{} ({}): {} protocol={} port={}",
-                    ip_lookup.ip().to_string().red(),
-                    asn.red(),
-                    format!("{:>TIME_COLUMN_WIDTH$}", "timed out").red(),
-                    "TCP".red(),
-                    port.to_string().red()
-                )
-            } else {
-                format!(
-                    "{}: {} protocol={} port={}",
-                    ip_lookup.ip().to_string().red(),
-                    format!("{:>TIME_COLUMN_WIDTH$}", "timed out").red(),
-                    "TCP".red(),
-                    port.to_string().red()
-                )
-            };
-            format!("{prefix}{status_message}")
-        },
-        |rtt| {
-            let time_colored = color_time_padded(rtt.as_secs_f64() * 1000.0, TIME_COLUMN_WIDTH);
-            let status_message = if show_asn {
-                format!(
-                    "{} ({}): {} protocol={} port={}",
-                    ip_lookup.ip().to_string().green(),
-                    asn.green(),
-                    time_colored,
-                    "TCP".green(),
-                    port.to_string().green()
-                )
-            } else {
-                format!(
-                    "{}: {} protocol={} port={}",
-                    ip_lookup.ip().to_string().green(),
-                    time_colored,
-                    "TCP".green(),
-                    port.to_string().green()
-                )
-            };
-            format!("{prefix}{status_message}")
-        },
+    format!(
+        "{prefix}{}{asn_part}: {time} protocol={} port={}",
+        paint(&ip_lookup.ip().to_string()),
+        paint("TCP"),
+        paint(&port.to_string())
     )
 }
 
@@ -271,8 +217,8 @@ pub fn perform_tcp(
         print_ip_info(destination, &ip_lookup.ip().to_string(), minimal);
     }
 
-    let mut asn = AsnLookup::spawn(ip_lookup.ip().to_string(), no_asn, timeout);
-    let stats = perform_connection(ip_lookup, port, timeout, count, &mut asn, minimal);
+    let asn = AsnLookup::spawn(ip_lookup.ip().to_string(), no_asn, timeout);
+    let stats = perform_connection(ip_lookup, port, timeout, count, &asn, minimal);
     print_statistics("TCP", &stats);
 
     Ok(())

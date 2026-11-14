@@ -1,7 +1,7 @@
 #![deny(warnings)]
 #![warn(clippy::pedantic, clippy::nursery)]
 
-use std::{error::Error, net::IpAddr};
+use std::{error::Error, net::IpAddr, process::ExitCode};
 
 mod asn_cache;
 mod cli;
@@ -41,24 +41,25 @@ fn handle_http_check(
     is_multi: bool,
     headers: &[String],
 ) {
+    let check = |target: &str| {
+        if target.starts_with("http://") || target.starts_with("https://") {
+            perform_http_check(target, timeout, count, minimal, headers);
+        } else {
+            perform_http_check(
+                &format!("http://{target}"),
+                timeout,
+                count,
+                minimal,
+                headers,
+            );
+        }
+    };
     if is_multi {
         for url in destinations {
-            let url = if !url.starts_with("http://") && !url.starts_with("https://") {
-                format!("http://{url}")
-            } else {
-                url.clone()
-            };
-            perform_http_check(&url, timeout, count, minimal, headers);
+            check(url);
         }
     } else {
-        let url = if !destination_input.starts_with("http://")
-            && !destination_input.starts_with("https://")
-        {
-            format!("http://{destination_input}")
-        } else {
-            destination_input.to_string()
-        };
-        perform_http_check(&url, timeout, count, minimal, headers);
+        check(destination_input);
     }
 }
 
@@ -73,23 +74,6 @@ const fn probe_kind_for(
         Some(p) => ProbeKind::tcp(p, timeout),
         None => ProbeKind::icmp(timeout, DEFAULT_TTL, DEFAULT_IDENT, payload),
     }
-}
-
-fn handle_subnet_scan(
-    subnet: Subnet,
-    port: Option<u16>,
-    udp: bool,
-    timeout: u64,
-    rounds: Option<usize>,
-    minimal: bool,
-    payload: &[u8; 24],
-) {
-    perform_subnet_scan(
-        subnet,
-        probe_kind_for(port, udp, timeout, *payload),
-        rounds,
-        minimal,
-    );
 }
 
 #[inline(never)]
@@ -247,7 +231,7 @@ const fn compute_per_host_attempts(scan_like: bool, explicit_count: bool, count:
     }
 }
 
-const MAX_SUBNET_MATRIX: usize = 4096;
+const MAX_SUBNET_MATRIX: u64 = 4096;
 
 #[expect(
     clippy::struct_excessive_bools,
@@ -257,8 +241,7 @@ struct ProbeCtx<'a> {
     destination_input: &'a str,
     destinations: &'a [String],
     is_multi: bool,
-    subnet_target: Option<Ipv4Subnet>,
-    ipv6_subnet_target: Option<Ipv6Subnet>,
+    subnet_target: Option<Subnet>,
     ports: Option<Vec<u16>>,
     udp: bool,
     timeout: u64,
@@ -270,63 +253,44 @@ struct ProbeCtx<'a> {
     payload: &'a [u8; 24],
 }
 
+fn check_matrix(subnet: Subnet, port_count: usize) -> Result<(), String> {
+    let host_count = subnet.host_count();
+    let label = match subnet {
+        Subnet::V4(_) => "Subnet",
+        Subnet::V6(_) => {
+            if host_count == u64::MAX {
+                return Err("IPv6 subnet too large to scan (max /112 supported)".to_string());
+            }
+            "IPv6 subnet"
+        }
+    };
+    let ports = port_count as u64;
+    let matrix = host_count.saturating_mul(ports);
+    if matrix > MAX_SUBNET_MATRIX {
+        return Err(format!(
+            "{label} x ports matrix too large ({host_count} hosts x {ports} ports = {matrix}, max {MAX_SUBNET_MATRIX}): narrow the subnet or reduce the ports"
+        ));
+    }
+    Ok(())
+}
+
 #[inline(never)]
 fn handle_multiport_subnet(ctx: &ProbeCtx<'_>, port_list: &[u16]) -> Result<bool, Box<dyn Error>> {
-    if let Some(subnet) = ctx.subnet_target {
-        let host_count = subnet.host_count() as usize;
-        let matrix = host_count.saturating_mul(port_list.len());
-        if matrix > MAX_SUBNET_MATRIX {
-            return Err(format!(
-                "Subnet x ports matrix too large ({} hosts x {} ports = {}, max {}): narrow the subnet or reduce the ports",
-                host_count,
-                port_list.len(),
-                matrix,
-                MAX_SUBNET_MATRIX
-            )
-            .into());
-        }
-        multiport::perform_multiport_subnet(
-            &subnet.notation(),
-            subnet.iter_hosts().map(IpAddr::V4),
-            port_list,
-            ctx.udp,
-            ctx.timeout,
-            ctx.per_host_attempts,
-            ctx.minimal,
-            ctx.no_asn,
-        );
-        return Ok(true);
-    }
-    if let Some(ipv6_subnet) = ctx.ipv6_subnet_target {
-        let host_count = ipv6_subnet.host_count();
-        if host_count == u128::MAX {
-            return Err("IPv6 subnet too large to scan (max /112 supported)".into());
-        }
-        let matrix =
-            host_count.saturating_mul(u128::try_from(port_list.len()).unwrap_or(u128::MAX));
-        if matrix > u128::try_from(MAX_SUBNET_MATRIX).unwrap_or(u128::MAX) {
-            return Err(format!(
-                "IPv6 subnet x ports matrix too large ({} hosts x {} ports = {}, max {}): narrow the subnet or reduce the ports",
-                host_count,
-                port_list.len(),
-                matrix,
-                MAX_SUBNET_MATRIX
-            )
-            .into());
-        }
-        multiport::perform_multiport_subnet(
-            &ipv6_subnet.notation(),
-            ipv6_subnet.iter_hosts().map(IpAddr::V6),
-            port_list,
-            ctx.udp,
-            ctx.timeout,
-            ctx.per_host_attempts,
-            ctx.minimal,
-            ctx.no_asn,
-        );
-        return Ok(true);
-    }
-    Ok(false)
+    let Some(subnet) = ctx.subnet_target else {
+        return Ok(false);
+    };
+    check_matrix(subnet, port_list.len())?;
+    multiport::perform_multiport_subnet(
+        &subnet.notation(),
+        &subnet.hosts(),
+        port_list,
+        ctx.udp,
+        ctx.timeout,
+        ctx.per_host_attempts,
+        ctx.minimal,
+        ctx.no_asn,
+    );
+    Ok(true)
 }
 
 #[inline(never)]
@@ -343,26 +307,12 @@ fn run_host_dispatch(ctx: &ProbeCtx<'_>, port: Option<u16>) -> Result<(), Box<dy
     let rounds = ctx.explicit_count.then_some(ctx.per_host_attempts);
 
     if let Some(subnet) = ctx.subnet_target {
-        handle_subnet_scan(
-            Subnet::V4(subnet),
-            port,
-            ctx.udp,
-            ctx.timeout,
+        let payload = *ctx.payload;
+        perform_subnet_scan(
+            subnet,
+            probe_kind_for(port, ctx.udp, ctx.timeout, payload),
             rounds,
             ctx.minimal,
-            ctx.payload,
-        );
-        return Ok(());
-    }
-    if let Some(ipv6_subnet) = ctx.ipv6_subnet_target {
-        handle_subnet_scan(
-            Subnet::V6(ipv6_subnet),
-            port,
-            ctx.udp,
-            ctx.timeout,
-            rounds,
-            ctx.minimal,
-            ctx.payload,
         );
         return Ok(());
     }
@@ -432,33 +382,29 @@ fn run_multiport_dispatch(ctx: &ProbeCtx<'_>, port_list: &[u16]) -> Result<(), B
 struct ResolvedTargets {
     destinations: Vec<String>,
     is_multi: bool,
-    subnet_target: Option<Ipv4Subnet>,
-    ipv6_subnet_target: Option<Ipv6Subnet>,
+    subnet_target: Option<Subnet>,
 }
 
 fn resolve_targets(destination_input: &str) -> ResolvedTargets {
-    let mut destinations = parse_multiple_destinations(destination_input);
-    if destinations.len() > 1 {
-        use std::collections::HashSet;
-        let mut seen = HashSet::new();
-        destinations.retain(|d| seen.insert(d.clone()));
+    let mut destinations: Vec<String> = Vec::new();
+    for dest in parse_multiple_destinations(destination_input) {
+        if !destinations.contains(&dest) {
+            destinations.push(dest);
+        }
     }
     let is_multi = destinations.len() > 1;
     let subnet_target = if is_multi {
         None
     } else {
-        Ipv4Subnet::from_str(destination_input).ok()
-    };
-    let ipv6_subnet_target = if !is_multi && subnet_target.is_none() {
-        Ipv6Subnet::from_str(destination_input).ok()
-    } else {
-        None
+        Ipv4Subnet::from_str(destination_input)
+            .ok()
+            .map(Subnet::V4)
+            .or_else(|| Ipv6Subnet::from_str(destination_input).ok().map(Subnet::V6))
     };
     ResolvedTargets {
         destinations,
         is_multi,
         subnet_target,
-        ipv6_subnet_target,
     }
 }
 
@@ -577,12 +523,22 @@ fn print_help_or_version(args: &Arguments) -> bool {
     false
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> ExitCode {
     #[cfg(target_os = "windows")]
     fix_ansicolor::enable_ansi_support();
 
     colors::init_colors();
 
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> Result<(), Box<dyn Error>> {
     let mut args = Arguments::from_env();
 
     if print_help_or_version(&args) {
@@ -610,10 +566,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         destinations,
         is_multi,
         subnet_target,
-        ipv6_subnet_target,
     } = resolve_targets(&destination_input);
 
-    let has_subnet = subnet_target.is_some() || ipv6_subnet_target.is_some();
+    let has_subnet = subnet_target.is_some();
     let scan_like = is_multi || has_subnet || ports.as_ref().is_some_and(|p| p.len() > 1);
     let per_host_attempts: usize = compute_per_host_attempts(scan_like, explicit_count, count);
 
@@ -656,7 +611,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         destinations: &destinations,
         is_multi,
         subnet_target,
-        ipv6_subnet_target,
         ports,
         udp,
         timeout,

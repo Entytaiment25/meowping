@@ -1,5 +1,5 @@
 use crate::colors::Colorize;
-use crate::output::{PingStats, TIME_COLUMN_WIDTH, color_time_padded, print_statistics};
+use crate::output::{PingStats, TIME_COLUMN_WIDTH, color_time_padded, micros, print_statistics};
 use crate::tcp::{AsnLookup, resolve_ip};
 use std::borrow::Cow;
 use std::io::ErrorKind;
@@ -92,7 +92,7 @@ fn format_udp_status(
 
     match outcome {
         ProbeOutcome::Open { rtt, bytes } => {
-            let time_colored = color_time_padded(rtt.as_secs_f64() * 1000.0, TIME_COLUMN_WIDTH);
+            let time_colored = color_time_padded(micros(*rtt), TIME_COLUMN_WIDTH);
             let body = if show_asn {
                 format!(
                     "{} ({}): {} protocol={} port={} bytes={}",
@@ -170,7 +170,7 @@ pub fn perform_udp(
         crate::tcp::print_ip_info(destination, &ip_lookup.ip().to_string(), minimal);
     }
 
-    let mut asn = AsnLookup::spawn(ip_lookup.ip().to_string(), no_asn, timeout);
+    let asn = AsnLookup::spawn(ip_lookup.ip().to_string(), no_asn, timeout);
     let payload = probe_payload(port);
     let timeout_dur = Duration::from_millis(timeout);
 
@@ -198,9 +198,9 @@ pub fn perform_udp(
     Ok(())
 }
 
-const fn outcome_rtt(outcome: &ProbeOutcome) -> Option<u128> {
+fn outcome_rtt(outcome: &ProbeOutcome) -> Option<u64> {
     match outcome {
-        ProbeOutcome::Open { rtt, .. } => Some(rtt.as_micros()),
+        ProbeOutcome::Open { rtt, .. } => Some(micros(*rtt)),
         ProbeOutcome::Closed | ProbeOutcome::NoResponse => None,
     }
 }

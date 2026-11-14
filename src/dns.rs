@@ -1,5 +1,5 @@
 use crate::colors::Colorize;
-use crate::output::{PingStats, color_time, format_with_prefix, print_statistics};
+use crate::output::{PingStats, color_time, format_with_prefix, micros, print_statistics};
 use crate::parser::{Extracted, Parser};
 use std::error::Error;
 use std::io::ErrorKind;
@@ -127,7 +127,7 @@ fn format_dns_status(
 
     let body = match outcome {
         DnsOutcome::Resolved { rtt, ancount } => {
-            let time_colored = color_time(rtt.as_secs_f64() * 1000.0);
+            let time_colored = color_time(micros(*rtt));
             format!(
                 "{} : {} protocol=DNS domain={} rcode={} answers={}",
                 resolver.green(),
@@ -138,7 +138,7 @@ fn format_dns_status(
             )
         }
         DnsOutcome::Negative { rtt, rcode } => {
-            let time_colored = color_time(rtt.as_secs_f64() * 1000.0);
+            let time_colored = color_time(micros(*rtt));
             format!(
                 "{} : {} protocol=DNS domain={} rcode={}",
                 resolver.orange(),
@@ -200,7 +200,7 @@ pub fn perform_dns(
             is_success,
             match outcome {
                 DnsOutcome::Resolved { rtt, .. } | DnsOutcome::Negative { rtt, .. } => {
-                    Some(rtt.as_micros())
+                    Some(micros(rtt))
                 }
                 DnsOutcome::NoResponse => None,
             },
