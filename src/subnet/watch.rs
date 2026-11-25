@@ -65,7 +65,7 @@ fn install_watch_interrupt_handler() {
 }
 
 #[cfg(windows)]
-unsafe extern "system" fn watch_ctrl_handler(ctrl_type: u32) -> i32 {
+extern "system" fn watch_ctrl_handler(ctrl_type: u32) -> i32 {
     use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT};
     if ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT {
         WATCH_INTERRUPTED.store(true, Ordering::SeqCst);

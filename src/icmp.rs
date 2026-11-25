@@ -23,29 +23,35 @@ pub const DEFAULT_IDENT: u16 = 0;
 mod platform {
     use super::{Duration, Instant, Ipv4Addr, Ipv6Addr};
     use std::io;
-    use std::mem;
-    use std::os::fd::RawFd;
+    use std::net::{SocketAddr, UdpSocket};
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 
-    fn retry_on_eintr(mut f: impl FnMut() -> libc::ssize_t) -> io::Result<libc::ssize_t> {
+    fn retry_on_eintr<T>(mut f: impl FnMut() -> io::Result<T>) -> io::Result<T> {
         loop {
-            let result = f();
-            if result >= 0 {
-                return Ok(result);
-            }
-            let err = io::Error::last_os_error();
-            if err.kind() != io::ErrorKind::Interrupted {
-                return Err(err);
+            match f() {
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
+                result => return result,
             }
         }
     }
 
-    fn socklen_of<T>() -> io::Result<libc::socklen_t> {
-        libc::socklen_t::try_from(mem::size_of::<T>())
-            .map_err(|_| io::Error::other("socklen_t overflow"))
-    }
-
-    fn sa_family(value: libc::c_int) -> io::Result<libc::sa_family_t> {
-        libc::sa_family_t::try_from(value).map_err(|_| io::Error::other("sa_family_t overflow"))
+    fn icmp_socket(domain: libc::c_int, protocol: libc::c_int) -> io::Result<(UdpSocket, bool)> {
+        for (ty, is_dgram) in [(libc::SOCK_DGRAM, true), (libc::SOCK_RAW, false)] {
+            // SAFETY: socket() takes plain integers and returns a new descriptor or -1. A new
+            // descriptor is owned by nobody else, so `OwnedFd` can take it and close it once.
+            let fd = unsafe {
+                let fd = libc::socket(domain, ty, protocol);
+                if fd < 0 {
+                    None
+                } else {
+                    Some(OwnedFd::from_raw_fd(fd))
+                }
+            };
+            if let Some(fd) = fd {
+                return Ok((UdpSocket::from(fd), is_dgram));
+            }
+        }
+        Err(io::Error::last_os_error())
     }
 
     fn icmp_checksum(data: &[u8]) -> u16 {
@@ -65,79 +71,36 @@ mod platform {
         !u16::from_be_bytes([hi, lo])
     }
 
-    fn setsockopt_raw(
-        fd: RawFd,
-        level: libc::c_int,
-        name: libc::c_int,
-        val: *const libc::c_void,
-        len: libc::socklen_t,
-    ) -> io::Result<()> {
+    fn set_ttl_v6(sock: &UdpSocket, ttl: u8) -> io::Result<()> {
+        let val = libc::c_int::from(ttl);
+        let len = libc::socklen_t::try_from(size_of::<libc::c_int>())
+            .map_err(|_| io::Error::other("socklen_t overflow"))?;
         // SAFETY: `val` points to a live value of `len` bytes, owned by the caller for this call.
-        let ret = unsafe { libc::setsockopt(fd, level, name, val, len) };
+        let ret = unsafe {
+            libc::setsockopt(
+                sock.as_raw_fd(),
+                libc::IPPROTO_IPV6,
+                libc::IPV6_UNICAST_HOPS,
+                (&raw const val).cast::<libc::c_void>(),
+                len,
+            )
+        };
         if ret == -1 {
             return Err(io::Error::last_os_error());
         }
         Ok(())
     }
 
-    #[allow(
-        clippy::unnecessary_fallible_conversions,
-        reason = "suseconds_t is i32 on macOS but i64 on Linux, where the conversion cannot fail"
-    )]
-    fn set_recv_timeout(fd: RawFd, timeout: Duration) -> io::Result<()> {
-        let tv = libc::timeval {
-            tv_sec: libc::time_t::try_from(timeout.as_secs())
-                .map_err(|_| io::Error::other("timeout seconds overflow time_t"))?,
-            tv_usec: libc::suseconds_t::try_from(timeout.subsec_micros())
-                .map_err(|_| io::Error::other("timeout micros overflow suseconds_t"))?,
-        };
-        setsockopt_raw(
-            fd,
-            libc::SOL_SOCKET,
-            libc::SO_RCVTIMEO,
-            (&raw const tv).cast::<libc::c_void>(),
-            socklen_of::<libc::timeval>()?,
-        )
-    }
-
-    fn setsockopt_int(
-        fd: RawFd,
-        level: libc::c_int,
-        name: libc::c_int,
-        val: libc::c_int,
-    ) -> io::Result<()> {
-        setsockopt_raw(
-            fd,
-            level,
-            name,
-            (&raw const val).cast::<libc::c_void>(),
-            socklen_of::<libc::c_int>()?,
-        )
-    }
-
-    fn set_ttl(fd: RawFd, ttl: u8) -> io::Result<()> {
-        setsockopt_int(fd, libc::IPPROTO_IP, libc::IP_TTL, libc::c_int::from(ttl))
-    }
-
-    fn set_ttl_v6(fd: RawFd, ttl: u8) -> io::Result<()> {
-        setsockopt_int(
-            fd,
-            libc::IPPROTO_IPV6,
-            libc::IPV6_UNICAST_HOPS,
-            libc::c_int::from(ttl),
-        )
-    }
-
-    struct FdGuard {
-        fd: RawFd,
-    }
-    impl Drop for FdGuard {
-        fn drop(&mut self) {
-            // SAFETY: the guard owns `fd` and closes it exactly once, here.
-            unsafe {
-                libc::close(self.fd);
-            }
-        }
+    fn send_and_receive(
+        sock: &UdpSocket,
+        packet: &[u8],
+        dest: SocketAddr,
+        buf: &mut [u8],
+    ) -> io::Result<(usize, Duration)> {
+        let send_time = Instant::now();
+        retry_on_eintr(|| sock.send_to(packet, dest))?;
+        let received = retry_on_eintr(|| sock.recv(buf))?;
+        Ok((received, send_time.elapsed()))
     }
 
     pub fn ping_once_ipv6(
@@ -148,23 +111,10 @@ mod platform {
         ident: u16,
         payload: &[u8; 24],
     ) -> io::Result<(usize, Duration)> {
-        // SAFETY: socket() takes plain integers and returns a new descriptor or -1.
-        let fd_raw =
-            unsafe { libc::socket(libc::AF_INET6, libc::SOCK_DGRAM, libc::IPPROTO_ICMPV6) };
-        let is_dgram = fd_raw >= 0;
-        let fd_raw = if fd_raw < 0 {
-            // SAFETY: as above, plain integers in, descriptor or -1 out.
-            unsafe { libc::socket(libc::AF_INET6, libc::SOCK_RAW, libc::IPPROTO_ICMPV6) }
-        } else {
-            fd_raw
-        };
-        if fd_raw < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let fd = FdGuard { fd: fd_raw };
+        let (sock, is_dgram) = icmp_socket(libc::AF_INET6, libc::IPPROTO_ICMPV6)?;
 
-        set_recv_timeout(fd.fd, timeout)?;
-        let _ = set_ttl_v6(fd.fd, ttl);
+        sock.set_read_timeout((!timeout.is_zero()).then_some(timeout))?;
+        let _ = set_ttl_v6(&sock, ttl);
 
         let identifier = ident;
 
@@ -179,50 +129,8 @@ mod platform {
         packet[7] = (seq & 0xff) as u8;
         packet[8..].copy_from_slice(payload);
 
-        // SAFETY: sockaddr_in6 is plain C data for which all-zero bytes are valid.
-        let mut addr: libc::sockaddr_in6 = unsafe { mem::zeroed() };
-        addr.sin6_family = sa_family(libc::AF_INET6)?;
-        addr.sin6_port = 0;
-        addr.sin6_addr = libc::in6_addr {
-            s6_addr: ip.octets(),
-        };
-
-        let addr_ptr = (&raw const addr).cast::<libc::sockaddr>();
-        let addr_len = socklen_of::<libc::sockaddr_in6>()?;
-
-        let send_time = Instant::now();
-        // SAFETY: `packet` and `addr` outlive the call, and the lengths passed are their sizes.
-        retry_on_eintr(|| unsafe {
-            libc::sendto(
-                fd.fd,
-                packet.as_ptr().cast::<libc::c_void>(),
-                packet.len(),
-                0,
-                addr_ptr,
-                addr_len,
-            )
-        })?;
-
         let mut buf = [0u8; 1500];
-        // SAFETY: sockaddr_in6 is plain C data for which all-zero bytes are valid.
-        let mut from: libc::sockaddr_in6 = unsafe { mem::zeroed() };
-        let mut from_len = socklen_of::<libc::sockaddr_in6>()?;
-
-        // SAFETY: `buf`, `from` and `from_len` outlive the call, and `from_len` holds the size
-        // of `from`.
-        let received = retry_on_eintr(|| unsafe {
-            libc::recvfrom(
-                fd.fd,
-                buf.as_mut_ptr().cast::<libc::c_void>(),
-                buf.len(),
-                0,
-                (&raw mut from).cast::<libc::sockaddr>(),
-                &raw mut from_len,
-            )
-        })?;
-        let rtt = send_time.elapsed();
-
-        let n = received.cast_unsigned();
+        let (n, rtt) = send_and_receive(&sock, &packet, SocketAddr::new(ip.into(), 0), &mut buf)?;
         let view = &buf[..n];
 
         if n < 8 {
@@ -250,24 +158,10 @@ mod platform {
         ident: u16,
         payload: &[u8; 24],
     ) -> io::Result<(usize, Duration)> {
-        // SAFETY: socket() takes plain integers and returns a new descriptor or -1.
-        let fd_dgram = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, libc::IPPROTO_ICMP) };
-        let (fd_raw, is_dgram) = if fd_dgram >= 0 {
-            (fd_dgram, true)
-        } else {
-            (
-                // SAFETY: as above, plain integers in, descriptor or -1 out.
-                unsafe { libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_ICMP) },
-                false,
-            )
-        };
-        if fd_raw < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let fd = FdGuard { fd: fd_raw };
+        let (sock, is_dgram) = icmp_socket(libc::AF_INET, libc::IPPROTO_ICMP)?;
 
-        set_recv_timeout(fd.fd, timeout)?;
-        let _ = set_ttl(fd.fd, ttl);
+        sock.set_read_timeout((!timeout.is_zero()).then_some(timeout))?;
+        let _ = sock.set_ttl(u32::from(ttl));
 
         let identifier = ident;
 
@@ -286,50 +180,8 @@ mod platform {
         packet[2] = (csum >> 8) as u8;
         packet[3] = (csum & 0xff) as u8;
 
-        // SAFETY: sockaddr_in is plain C data for which all-zero bytes are valid.
-        let mut addr: libc::sockaddr_in = unsafe { mem::zeroed() };
-        addr.sin_family = sa_family(libc::AF_INET)?;
-        addr.sin_port = 0;
-        addr.sin_addr = libc::in_addr {
-            s_addr: u32::from_be_bytes(ip.octets()).to_be(),
-        };
-
-        let addr_ptr = (&raw const addr).cast::<libc::sockaddr>();
-        let addr_len = socklen_of::<libc::sockaddr_in>()?;
-
-        let send_time = Instant::now();
-        // SAFETY: `packet` and `addr` outlive the call, and the lengths passed are their sizes.
-        retry_on_eintr(|| unsafe {
-            libc::sendto(
-                fd.fd,
-                packet.as_ptr().cast::<libc::c_void>(),
-                packet.len(),
-                0,
-                addr_ptr,
-                addr_len,
-            )
-        })?;
-
         let mut buf = [0u8; 1500];
-        // SAFETY: sockaddr_in is plain C data for which all-zero bytes are valid.
-        let mut from: libc::sockaddr_in = unsafe { mem::zeroed() };
-        let mut from_len = socklen_of::<libc::sockaddr_in>()?;
-
-        // SAFETY: `buf`, `from` and `from_len` outlive the call, and `from_len` holds the size
-        // of `from`.
-        let received = retry_on_eintr(|| unsafe {
-            libc::recvfrom(
-                fd.fd,
-                buf.as_mut_ptr().cast::<libc::c_void>(),
-                buf.len(),
-                0,
-                (&raw mut from).cast::<libc::sockaddr>(),
-                &raw mut from_len,
-            )
-        })?;
-        let rtt = send_time.elapsed();
-
-        let n = received.cast_unsigned();
+        let (n, rtt) = send_and_receive(&sock, &packet, SocketAddr::new(ip.into(), 0), &mut buf)?;
         let view = &buf[..n];
 
         let mut off = 0usize;
@@ -383,20 +235,21 @@ mod platform {
 mod platform {
     use super::{Duration, Instant, Ipv4Addr, Ipv6Addr};
     use std::io;
-    use std::mem;
-    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use std::mem::{self, DropGuard};
+    use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::NetworkManagement::IpHelper::{
-        ICMP_ECHO_REPLY, IcmpCloseHandle, IcmpCreateFile, IcmpSendEcho,
+        ICMP_ECHO_REPLY, Icmp6CreateFile, Icmp6SendEcho2, IcmpCloseHandle, IcmpCreateFile,
+        IcmpSendEcho,
     };
+    use windows_sys::Win32::Networking::WinSock::{AF_INET6, IN6_ADDR, IN6_ADDR_0, SOCKADDR_IN6};
 
-    struct HandleGuard(isize);
-    impl Drop for HandleGuard {
-        fn drop(&mut self) {
+    fn handle_guard(handle: HANDLE) -> DropGuard<HANDLE, impl FnOnce(HANDLE)> {
+        DropGuard::new(handle, |handle| {
             // SAFETY: the guard owns the handle from IcmpCreateFile and closes it once, here.
             unsafe {
-                IcmpCloseHandle(self.0 as *mut std::ffi::c_void);
+                IcmpCloseHandle(handle);
             }
-        }
+        })
     }
 
     pub fn ping_once_ipv4(
@@ -415,13 +268,13 @@ mod platform {
             if handle == INVALID_HANDLE_VALUE {
                 return Err(io::Error::last_os_error());
             }
-            let handle = HandleGuard(handle as isize);
+            let handle = handle_guard(handle);
 
             let mut reply_buf = [0u8; mem::size_of::<ICMP_ECHO_REPLY>() + 24 + 8];
 
             let start = Instant::now();
             let num = IcmpSendEcho(
-                handle.0 as *mut std::ffi::c_void,
+                *handle,
                 u32::from_be_bytes(ip.octets()).to_be(),
                 payload.as_ptr().cast(),
                 u16::try_from(payload.len()).unwrap_or(u16::MAX),
@@ -449,62 +302,26 @@ mod platform {
         _ident: u16,
         payload: &[u8; 24],
     ) -> io::Result<(usize, Duration)> {
-        #[repr(C)]
-        #[expect(
-            clippy::struct_field_names,
-            reason = "fields mirror the Windows SOCKADDR_IN6 layout"
-        )]
-        struct SockAddrIn6 {
-            sin6_family: u16,
-            sin6_port: u16,
-            sin6_flowinfo: u32,
-            sin6_addr: [u8; 16],
-            sin6_scope_id: u32,
-        }
-
-        #[link(name = "iphlpapi")]
-        // SAFETY: these are the iphlpapi declarations of Icmp6CreateFile and Icmp6SendEcho2.
-        unsafe extern "system" {
-            fn Icmp6CreateFile() -> isize;
-            fn Icmp6SendEcho2(
-                icmphandle: isize,
-                event: isize,
-                apcroutine: usize,
-                apccontext: usize,
-                sourceaddress: *const SockAddrIn6,
-                destinationaddress: *const SockAddrIn6,
-                requestdata: *const u8,
-                requestsize: u16,
-                requestoptions: usize,
-                replybuffer: *mut u8,
-                replysize: u32,
-                timeout: u32,
-            ) -> u32;
-        }
-
         // SAFETY: the handle is checked before use and closed by its guard. The addresses and
         // buffers outlive the call, with their real lengths passed.
         unsafe {
             let handle = Icmp6CreateFile();
-            if handle == INVALID_HANDLE_VALUE as isize {
+            if handle == INVALID_HANDLE_VALUE {
                 return Err(io::Error::last_os_error());
             }
-            let handle = HandleGuard(handle);
+            let handle = handle_guard(handle);
 
-            let src_addr = SockAddrIn6 {
-                sin6_family: 23, // AF_INET6
-                sin6_port: 0,
-                sin6_flowinfo: 0,
-                sin6_addr: [0u8; 16],
-                sin6_scope_id: 0,
+            let src_addr = SOCKADDR_IN6 {
+                sin6_family: AF_INET6,
+                ..Default::default()
             };
 
-            let dst_addr = SockAddrIn6 {
-                sin6_family: 23,
-                sin6_port: 0,
-                sin6_flowinfo: 0,
-                sin6_addr: ip.octets(),
-                sin6_scope_id: 0,
+            let dst_addr = SOCKADDR_IN6 {
+                sin6_family: AF_INET6,
+                sin6_addr: IN6_ADDR {
+                    u: IN6_ADDR_0 { Byte: ip.octets() },
+                },
+                ..Default::default()
             };
 
             // ICMPV6_ECHO_REPLY_LH (36 bytes) + payload + 8 bytes for ICMP error message + IO_STATUS_BLOCK (16 bytes on 64-bit)
@@ -512,16 +329,16 @@ mod platform {
 
             let start = Instant::now();
             let num = Icmp6SendEcho2(
-                handle.0,
-                0, // event = NULL
-                0, // apcroutine = NULL
-                0, // apccontext = NULL
+                *handle,
+                std::ptr::null_mut(), // event = NULL
+                None,                 // apcroutine = NULL
+                std::ptr::null(),     // apccontext = NULL
                 &raw const src_addr,
                 &raw const dst_addr,
-                payload.as_ptr(),
+                payload.as_ptr().cast(),
                 u16::try_from(payload.len()).unwrap_or(u16::MAX),
-                0, // requestoptions = NULL
-                reply_buf.as_mut_ptr(),
+                std::ptr::null(), // requestoptions = NULL
+                reply_buf.as_mut_ptr().cast(),
                 u32::try_from(reply_buf.len()).unwrap_or(u32::MAX),
                 u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX),
             );
