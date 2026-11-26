@@ -1,6 +1,13 @@
 [build]
 rustflags = ["-Zshare-generics=false", "-Z", "threads=8"]
 
+[target.'cfg(target_os = "linux")']
+rustflags = ["-Zshare-generics=false", "-Z", "threads=8", "-Cforce-unwind-tables=no"]
+
+[env]
+CFLAGS_x86_64_unknown_linux_gnu = "-fno-asynchronous-unwind-tables -fno-unwind-tables"
+CFLAGS_aarch64_unknown_linux_gnu = "-fno-asynchronous-unwind-tables -fno-unwind-tables"
+
 [unstable]
 build-std = ["std", "panic_abort"]
 build-std-features = ["optimize_for_size", "panic-unwind"]
